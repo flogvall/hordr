@@ -1993,6 +1993,17 @@ impl ClientShellState {
                     outcome.repaint = true;
                     return;
                 }
+                // fork: context tabs
+                if let Some(tab) = self
+                    .hits
+                    .context_tabs
+                    .iter()
+                    .find(|(rect, _)| super::contains(*rect, point))
+                    .map(|(_, tab)| tab.clone())
+                {
+                    self.handle_context_tab_click(tab, outcome);
+                    return;
+                }
                 if super::contains(self.hits.new_workspace, point) {
                     self.record_binding(
                         crate::input::KeybindMatch::Action(

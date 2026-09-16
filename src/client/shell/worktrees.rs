@@ -541,7 +541,8 @@ impl ClientShellState {
                 | PendingEndpointKind::CopyMotion { .. }
                 | PendingEndpointKind::CopySearch { .. }
                 // fork: context tabs
-                | PendingEndpointKind::ContextReport { .. },
+                | PendingEndpointKind::ContextReport { .. }
+                | PendingEndpointKind::WorkspaceCreateInContext { .. },
                 Err(_),
             ) => true,
         }

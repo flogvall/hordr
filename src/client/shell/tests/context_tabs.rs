@@ -1,6 +1,7 @@
 // fork: context tabs
 use super::*;
 use crate::protocol::ClientShellAgent;
+use crossterm::event::{KeyModifiers, MouseButton, MouseEventKind};
 
 fn agent(pane_id: &str, workspace_id: &str, focused: bool) -> ClientShellAgent {
     ClientShellAgent {
@@ -350,4 +351,272 @@ fn machines_sidebar_draws_the_tab_row_too() {
     state.set_endpoint_snapshot(&remote, Box::new(projected));
     assert_eq!(heading_row(&mut state, 106), " + default kund privat all");
     assert_eq!(state.hits.context_tabs.len(), 5);
+}
+
+fn click(state: &mut ClientShellState, column: u16, row: u16) -> ClientShellInput {
+    state.handle_raw_events(vec![RawInputEvent::Mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column,
+        row,
+        modifiers: KeyModifiers::empty(),
+    })])
+}
+
+fn tab_rect(state: &ClientShellState, tab: &contexts::ContextTab) -> Rect {
+    state
+        .hits
+        .context_tabs
+        .iter()
+        .find(|(_, candidate)| candidate == tab)
+        .map(|(rect, _)| *rect)
+        .expect("tab hit")
+}
+
+fn report_targets(outcome: &ClientShellInput) -> Vec<(String, Option<String>)> {
+    outcome
+        .actions
+        .iter()
+        .filter_map(|action| match action {
+            ClientShellAction::Endpoint { request, .. } => match &request.method {
+                crate::api::schema::Method::WorkspaceReportMetadata(params) => Some((
+                    params.workspace_id.clone(),
+                    params.tokens.get("context").cloned().flatten(),
+                )),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn clicking_a_tab_switches_the_context_and_persists_it() {
+    let path = std::env::temp_dir().join(format!(
+        "herdr-context-tabs-click-{}.json",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_file(&path);
+    let mut config = Config::default();
+    config.ui.sidebar.spaces.context_token = Some("context".into());
+    let mut state = ClientShellState::new(
+        ClientShellConfig::from_config(&config).with_preferences_path(path.clone()),
+    );
+    state.sidebar_width = 32;
+    state.sidebar_width_manual = true;
+    state.set_snapshot(Box::new(contextual_snapshot()));
+    state.set_pane_surface(surface());
+    state.compose(106, 30).expect("composed frame");
+
+    let kund = tab_rect(&state, &contexts::ContextTab::Named("kund".into()));
+    let outcome = click(&mut state, kund.x, kund.y);
+    assert!(outcome.repaint);
+    assert!(outcome.actions.is_empty());
+    state.compose(106, 30).expect("composed frame");
+    assert_eq!(visible_workspaces(&state), ["ws_2", "ws_4"]);
+
+    let reloaded = ClientShellState::new(
+        ClientShellConfig::from_config(&config).with_preferences_path(path.clone()),
+    );
+    assert_eq!(
+        reloaded.contexts.active(),
+        &contexts::ActiveContext::Named("kund".into())
+    );
+    assert_eq!(
+        reloaded.contexts.known().collect::<Vec<_>>(),
+        ["kund", "privat"]
+    );
+    std::fs::remove_file(path).expect("remove preferences");
+}
+
+#[test]
+fn plus_tab_prompts_for_a_new_context_and_activates_it() {
+    let mut state = contextual_state(Some("context"));
+    state.compose(106, 30).expect("composed frame");
+    let plus = tab_rect(&state, &contexts::ContextTab::New);
+    click(&mut state, plus.x, plus.y);
+    assert!(matches!(
+        state.overlay,
+        Some(ClientShellOverlay::Rename(ClientRenameOverlay {
+            title: "new context",
+            ..
+        }))
+    ));
+    state.handle_input_bytes(b"ops");
+    let outcome = state.handle_input_bytes(b"\r");
+    assert!(state.overlay.is_none());
+    assert!(outcome.actions.is_empty());
+    assert_eq!(
+        state.contexts.active(),
+        &contexts::ActiveContext::Named("ops".into())
+    );
+    assert_eq!(
+        state.contexts.known().collect::<Vec<_>>(),
+        ["kund", "ops", "privat"]
+    );
+    state.compose(106, 30).expect("composed frame");
+    assert!(visible_workspaces(&state).is_empty());
+
+    // Built-in labels are refused and leave the selection alone.
+    state.open_new_context_overlay(None);
+    state.handle_input_bytes(b"all");
+    state.handle_input_bytes(b"\r");
+    assert_eq!(
+        state.contexts.active(),
+        &contexts::ActiveContext::Named("ops".into())
+    );
+    assert!(state.visible_endpoint_notice.is_some());
+}
+
+#[test]
+fn context_keys_cycle_through_the_tabs() {
+    let mut config = Config::default();
+    config.ui.sidebar.spaces.context_token = Some("context".into());
+    config.keys.next_context = crate::config::BindingConfig::one("prefix+shift+u");
+    config.keys.previous_context = crate::config::BindingConfig::one("prefix+shift+y");
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    state.set_snapshot(Box::new(contextual_snapshot()));
+    state.set_pane_surface(surface());
+    let press = |state: &mut ClientShellState, key: &[u8]| {
+        state.handle_input_bytes(&[0x02]);
+        state.handle_input_bytes(key)
+    };
+    press(&mut state, b"U");
+    assert_eq!(
+        state.contexts.active(),
+        &contexts::ActiveContext::Named("kund".into())
+    );
+    press(&mut state, b"U");
+    press(&mut state, b"U");
+    assert_eq!(state.contexts.active(), &contexts::ActiveContext::All);
+    press(&mut state, b"U");
+    assert_eq!(state.contexts.active(), &contexts::ActiveContext::Default);
+    press(&mut state, b"Y");
+    assert_eq!(state.contexts.active(), &contexts::ActiveContext::All);
+
+    // The keys are inert while the feature is off.
+    let mut config = Config::default();
+    config.keys.next_context = crate::config::BindingConfig::one("prefix+shift+u");
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    state.set_snapshot(Box::new(contextual_snapshot()));
+    state.set_pane_surface(surface());
+    press(&mut state, b"U");
+    assert_eq!(state.contexts.active(), &contexts::ActiveContext::Default);
+}
+
+fn created_workspace(workspace_id: &str) -> crate::api::schema::ResponseResult {
+    use crate::api::schema::{PaneInfo, TabInfo, WorkspaceInfo};
+    crate::api::schema::ResponseResult::WorkspaceCreated {
+        workspace: WorkspaceInfo {
+            workspace_id: workspace_id.into(),
+            number: 9,
+            label: "fresh".into(),
+            focused: true,
+            pane_count: 1,
+            tab_count: 1,
+            active_tab_id: format!("{workspace_id}-tab"),
+            agent_status: AgentStatus::Idle,
+            tokens: Default::default(),
+            worktree: None,
+        },
+        tab: TabInfo {
+            tab_id: format!("{workspace_id}-tab"),
+            workspace_id: workspace_id.into(),
+            number: 1,
+            label: "1".into(),
+            focused: true,
+            pane_count: 1,
+            agent_status: AgentStatus::Idle,
+        },
+        root_pane: PaneInfo {
+            pane_id: format!("{workspace_id}-pane"),
+            terminal_id: "terminal-9".into(),
+            workspace_id: workspace_id.into(),
+            tab_id: format!("{workspace_id}-tab"),
+            focused: true,
+            cwd: None,
+            foreground_cwd: None,
+            label: None,
+            agent: None,
+            title: None,
+            terminal_title: None,
+            terminal_title_stripped: None,
+            display_agent: None,
+            agent_status: AgentStatus::Idle,
+            state_labels: Default::default(),
+            tokens: Default::default(),
+            agent_session: None,
+            scroll: None,
+            revision: 1,
+        },
+    }
+}
+
+#[test]
+fn new_workspace_under_a_named_tab_reports_the_context() {
+    let mut state = contextual_state(Some("context"));
+    state
+        .contexts
+        .set_active(contexts::ActiveContext::Named("kund".into()));
+    state.handle_input_bytes(&[0x02]);
+    let outcome = state.handle_input_bytes(b"N");
+    let [ClientShellAction::Endpoint { request, .. }] = &outcome.actions[..] else {
+        panic!("workspace create request");
+    };
+    assert!(matches!(
+        &request.method,
+        crate::api::schema::Method::WorkspaceCreate(_)
+    ));
+    assert!(matches!(
+        state.pending_requests[&request.id].kind,
+        PendingEndpointKind::WorkspaceCreateInContext { ref context } if context == "kund"
+    ));
+
+    let (_, actions) =
+        state.handle_endpoint_result("boot-1", &request.id, Ok(created_workspace("ws_9")));
+    let [ClientShellAction::Endpoint { request, .. }] = &actions[..] else {
+        panic!("context report follows the create reply");
+    };
+    let crate::api::schema::Method::WorkspaceReportMetadata(params) = &request.method else {
+        panic!("expected report_metadata");
+    };
+    assert_eq!(params.workspace_id, "ws_9");
+    assert_eq!(params.source, contexts::CONTEXT_METADATA_SOURCE);
+    assert_eq!(params.tokens.get("context"), Some(&Some("kund".to_owned())));
+
+    // The next snapshot still lacks the token; the optimistic override keeps ws_9 visible.
+    let mut projected = contextual_snapshot();
+    let mut fresh = projected.workspaces[0].clone();
+    fresh.workspace_id = "ws_9".into();
+    fresh.active_tab_id = "ws_9-tab".into();
+    fresh.number = 9;
+    fresh.label = "fresh".into();
+    fresh.focused = true;
+    projected.workspaces[0].focused = false;
+    projected.workspaces.push(fresh);
+    projected.focused_workspace_id = Some("ws_9".into());
+    state.set_snapshot(Box::new(projected));
+    state.compose(106, 30).expect("composed frame");
+    assert_eq!(visible_workspaces(&state), ["ws_2", "ws_4", "ws_9"]);
+
+    // Under the default tab the create stays untagged.
+    state.activate_context(
+        contexts::ActiveContext::Default,
+        &mut ClientShellInput::default(),
+    );
+    state.handle_input_bytes(&[0x02]);
+    let outcome = state.handle_input_bytes(b"N");
+    let [ClientShellAction::Endpoint { request, .. }] = &outcome.actions[..] else {
+        panic!("workspace create request");
+    };
+    assert!(matches!(
+        state.pending_requests[&request.id].kind,
+        PendingEndpointKind::Generic
+    ));
+    let (_, actions) =
+        state.handle_endpoint_result("boot-1", &request.id, Ok(created_workspace("ws_10")));
+    assert!(report_targets(&ClientShellInput {
+        actions,
+        ..ClientShellInput::default()
+    })
+    .is_empty());
 }

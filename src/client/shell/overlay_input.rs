@@ -942,16 +942,26 @@ impl ClientShellState {
                 source_workspace_id,
                 cwd,
                 suggested_name,
-            } => Some(crate::api::schema::Method::WorkspaceCreate(
-                crate::api::schema::WorkspaceCreateParams {
-                    source_workspace_id,
-                    cwd,
-                    focus: true,
-                    label: (!trimmed.is_empty() && trimmed != suggested_name)
-                        .then(|| trimmed.to_owned()),
-                    env: Default::default(),
-                },
-            )),
+            } => {
+                // fork: context tabs
+                self.push_workspace_create(
+                    crate::api::schema::WorkspaceCreateParams {
+                        source_workspace_id,
+                        cwd,
+                        focus: true,
+                        label: (!trimmed.is_empty() && trimmed != suggested_name)
+                            .then(|| trimmed.to_owned()),
+                        env: Default::default(),
+                    },
+                    outcome,
+                );
+                None
+            }
+            // fork: context tabs
+            ClientRenameTarget::NewContext { workspace_id } => {
+                self.create_context(trimmed, workspace_id, outcome);
+                None
+            }
             ClientRenameTarget::Workspace { workspace_id } => (!trimmed.is_empty()).then(|| {
                 crate::api::schema::Method::WorkspaceRename(
                     crate::api::schema::WorkspaceRenameParams {

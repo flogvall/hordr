@@ -312,6 +312,12 @@ pub(super) enum ClientRenameTarget {
     Pane {
         pane_id: String,
     },
+    // fork: context tabs
+    /// New context name; `workspace_id` moves that workspace into it, `None` just
+    /// activates the new tab.
+    NewContext {
+        workspace_id: Option<String>,
+    },
 }
 
 #[derive(Debug)]
@@ -668,6 +674,12 @@ pub(super) enum PendingEndpointKind {
     /// `workspace.report_metadata` carrying a context token for one workspace.
     ContextReport {
         workspace_id: String,
+    },
+    // fork: context tabs
+    /// `workspace.create` issued while a named context tab is active; the new
+    /// workspace gets that context once its id is known.
+    WorkspaceCreateInContext {
+        context: String,
     },
 }
 

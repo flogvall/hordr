@@ -84,20 +84,33 @@ impl ClientShellState {
                     if self.config.prompt_new_workspace_name {
                         self.open_new_workspace_overlay();
                     } else {
-                        self.push_endpoint_method(
-                            crate::api::schema::Method::WorkspaceCreate(
-                                crate::api::schema::WorkspaceCreateParams {
-                                    source_workspace_id: self.workspace_action_id(),
-                                    cwd: None,
-                                    focus: true,
-                                    label: None,
-                                    env: Default::default(),
-                                },
-                            ),
+                        // fork: context tabs
+                        self.push_workspace_create(
+                            crate::api::schema::WorkspaceCreateParams {
+                                source_workspace_id: self.workspace_action_id(),
+                                cwd: None,
+                                focus: true,
+                                label: None,
+                                env: Default::default(),
+                            },
                             outcome,
                         );
                     }
                     outcome.repaint = true;
+                    return;
+                }
+                // fork: context tabs
+                if matches!(
+                    action,
+                    crate::input::KeybindAction::NextContext
+                        | crate::input::KeybindAction::PreviousContext
+                ) {
+                    let delta = if action == crate::input::KeybindAction::NextContext {
+                        1
+                    } else {
+                        -1
+                    };
+                    self.cycle_context(delta, outcome);
                     return;
                 }
                 if action == crate::input::KeybindAction::RenameWorkspace {
@@ -617,6 +630,21 @@ impl ClientShellState {
                     self.contexts.clear_pending(&endpoint_id, &workspace_id);
                 }
                 return (true, Vec::new());
+            }
+            // fork: context tabs
+            PendingEndpointKind::WorkspaceCreateInContext { context } => {
+                let mut outcome = ClientShellInput::default();
+                if let Ok(crate::api::schema::ResponseResult::WorkspaceCreated {
+                    workspace, ..
+                }) = &result
+                {
+                    self.push_context_report(
+                        workspace.workspace_id.clone(),
+                        Some(context),
+                        &mut outcome,
+                    );
+                }
+                return (true, outcome.actions);
             }
             PendingEndpointKind::ProductAnnouncementDismiss { version, id } => {
                 return match result {
