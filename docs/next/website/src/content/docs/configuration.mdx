@@ -468,6 +468,27 @@ Metadata reporters provide values only; styling stays in the local sidebar confi
 
 Sidebar row settings affect only the expanded desktop sidebar. Collapsed and mobile views keep their compact layouts.
 
+Group Spaces into context tabs with a workspace metadata token. Set `context_token` to the token key and the Space heading becomes a tab row: `+`, the default context, every known context, and `all`. Spaces without the token, including every Space that already exists when the setting is enabled, belong to `default_context`, which cannot be renamed or removed. The active tab filters the Space and Agent panels, navigate mode, `prefix+1..9`, next/previous workspace, and agent cycling. All three keys are unset by default.
+
+```toml
+[ui.sidebar.spaces]
+context_token = "context"
+default_context = "default"
+
+[keys]
+next_context = "prefix+]"
+previous_context = "prefix+["
+move_workspace_to_context = "prefix+shift+m"
+```
+
+Click a tab to activate it, click `+` to create a context, or right-click a tab to rename or remove it; removing a context clears the token on its Spaces. Right-click a Space and choose "Move to context..." to move it, or "New context..." to create a context and move the Space in one step. A Space created while a named tab is active gets that context. Scripts and plugins can set the same token:
+
+```bash
+herdr workspace report-metadata <workspace_id> --source my-hook --token context=client
+```
+
+Known contexts, the active tab, and a per-Space backup of the token live in the client state file, so they survive reattaching. The server does not persist metadata tokens across restarts; after a restart the client re-reports the backed-up context for every Space that came back without one. The tab row is drawn locally, so it works the same with `herdr --remote` and saved machines. With more than one machine it replaces the `machines` heading and the active tab applies to every machine.
+
 ## Notifications
 
 Herdr can notify you when a background agent finishes or needs input:
