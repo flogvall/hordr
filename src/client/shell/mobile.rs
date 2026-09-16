@@ -614,6 +614,7 @@ fn mobile_items(
         endpoints,
         active_endpoint_id,
         config.agent_panel_sort,
+        // fork: context tabs
         None,
     );
     let agent_view_label = snapshot.agent_view_label.as_deref();
@@ -755,6 +756,7 @@ fn mobile_items(
         palette,
     ));
     for endpoint in super::aggregate_navigation::cached_endpoint_snapshots(endpoints) {
+        // fork: context tabs — the mobile switcher stays unfiltered
         for entry in super::render::workspace_entries(endpoint.snapshot, &HashSet::new(), None) {
             let Some(workspace) = endpoint.snapshot.workspaces.get(entry.index) else {
                 continue;

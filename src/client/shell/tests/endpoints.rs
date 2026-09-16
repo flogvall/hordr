@@ -1906,6 +1906,7 @@ fn selected_position_sort_uses_public_tab_and_pane_numbers() {
         &state.endpoints,
         &state.active_endpoint_id,
         crate::config::AgentPanelSortConfig::Priority,
+        // fork: context tabs
         None,
     )
     .into_iter()
