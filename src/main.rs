@@ -157,6 +157,7 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # close_workspace = "prefix+shift+d"
 # previous_workspace = "" # optional, unset by default
 # next_workspace = ""     # optional, unset by default
+# fork: context tabs
 # previous_context = ""   # optional, unset by default; needs ui.sidebar.spaces.context_token
 # next_context = ""       # optional, unset by default; needs ui.sidebar.spaces.context_token
 # move_workspace_to_context = "" # optional, unset by default; opens the context list for the selected workspace
@@ -361,6 +362,7 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Blank rows between space entries. Set to 1 to restore the previous spacing.
 # row_gap = 0
 # rows = [["state_icon", "workspace"], ["branch", "git_status"]]
+# fork: context tabs
 # Group spaces into context tabs by a workspace metadata token (set with
 # `herdr workspace report-metadata <workspace> --source <id> --token context=<name>`).
 # Unset keeps the plain "spaces" heading. Spaces without the token belong to default_context.

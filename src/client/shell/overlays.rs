@@ -169,6 +169,7 @@ pub(crate) fn render_context_menu(
     let screen = buffer.area;
     let max_item_width = items
         .iter()
+        // fork: context tabs — labels are owned
         .map(|item| display_width(&item.label))
         .max()
         .unwrap_or(0);
