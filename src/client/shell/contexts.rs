@@ -618,21 +618,23 @@ pub(super) fn layout_tab_row(labels: &[&str], active: usize, width: u16) -> Vec<
         };
         visible.retain(|index| *index != farthest);
     }
-    let hidden_left = visible.first().is_some_and(|first| *first > 0);
-    let hidden_right = visible.last().is_some_and(|last| *last + 1 < labels.len());
-    let markers = usize::from(hidden_left) + usize::from(hidden_right);
-    if markers > 0 {
-        let used = visible
-            .iter()
-            .map(|index| display_width(&texts[*index]))
-            .sum::<usize>()
-            + visible.len().saturating_sub(1);
-        let room = width.saturating_sub(used);
-        if room < markers * 2 {
-            let squeeze = markers * 2 - room;
-            let current = display_width(&texts[active]);
-            texts[active] = truncate_to(&texts[active], current.saturating_sub(squeeze).max(1));
-        }
+    let mut hidden_left = visible.first().is_some_and(|first| *first > 0);
+    let mut hidden_right = visible.last().is_some_and(|last| *last + 1 < labels.len());
+    // Overflow markers are decoration: drop them before shortening the active label.
+    let used = visible
+        .iter()
+        .map(|index| display_width(&texts[*index]))
+        .sum::<usize>()
+        + visible.len().saturating_sub(1);
+    let room = width.saturating_sub(used);
+    if hidden_right && room < 2 * (usize::from(hidden_left) + 1) {
+        hidden_right = false;
+    }
+    if hidden_left && room < 2 {
+        hidden_left = false;
+    }
+    if visible == [active] && display_width(&texts[active]) > width {
+        texts[active] = truncate_to(&texts[active], width);
     }
     let mut cells = Vec::new();
     let mut x = 0usize;
@@ -665,6 +667,54 @@ pub(super) fn layout_tab_row(labels: &[&str], active: usize, width: u16) -> Vec<
         });
     }
     cells
+}
+
+/// Draws the tab row in place of the Spaces heading and registers one hit rect per tab.
+pub(super) fn render_tab_row(
+    buffer: &mut ratatui::buffer::Buffer,
+    area: ratatui::layout::Rect,
+    state: &ContextState,
+    palette: &crate::app::state::Palette,
+    register_hits: bool,
+    hits: &mut Vec<(ratatui::layout::Rect, ContextTab)>,
+) {
+    use ratatui::style::{Modifier, Style};
+
+    if area.height == 0 || area.width < 2 {
+        return;
+    }
+    let tabs = state.tabs();
+    let default_name = state.default_name();
+    let labels = tabs
+        .iter()
+        .map(|tab| tab.label(default_name))
+        .collect::<Vec<_>>();
+    let active = tabs
+        .iter()
+        .position(|tab| tab.is_active(state.active()))
+        .unwrap_or(1);
+    // Keep the heading's one-cell left margin.
+    let row_x = area.x.saturating_add(1);
+    let row_width = area.width.saturating_sub(1);
+    for cell in layout_tab_row(&labels, active, row_width) {
+        let x = row_x.saturating_add(cell.x);
+        let width = super::render::display_width(&cell.text);
+        let style = match cell.tab {
+            Some(index) if index == active => Style::default()
+                .fg(palette.accent)
+                .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
+            Some(_) => Style::default().fg(palette.overlay0),
+            None => Style::default()
+                .fg(palette.overlay0)
+                .add_modifier(Modifier::DIM),
+        };
+        super::render::put_text(buffer, x, area.y, width, &cell.text, style);
+        if register_hits {
+            if let Some(tab) = cell.tab.and_then(|index| tabs.get(index)) {
+                hits.push((ratatui::layout::Rect::new(x, area.y, width, 1), tab.clone()));
+            }
+        }
+    }
 }
 
 #[cfg(test)]

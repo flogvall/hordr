@@ -115,6 +115,8 @@ pub(super) struct ShellHitMap {
     pub(super) notification_toast: Rect,
     pub(super) global_menu_rows: Vec<(Rect, usize)>,
     pub(super) context_menu_rows: Vec<(Rect, usize)>,
+    // fork: context tabs
+    pub(super) context_tabs: Vec<(Rect, contexts::ContextTab)>,
     pub(super) overlay_primary: Rect,
     pub(super) overlay_clear: Rect,
     pub(super) overlay_cancel: Rect,

@@ -66,6 +66,9 @@ pub(super) fn contextual_state(token: Option<&str>) -> ClientShellState {
     let mut config = Config::default();
     config.ui.sidebar.spaces.context_token = token.map(str::to_owned);
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    // Wide enough for "+ default kund privat all" plus the divider column.
+    state.sidebar_width = 32;
+    state.sidebar_width_manual = true;
     state.set_snapshot(Box::new(contextual_snapshot()));
     state.set_pane_surface(surface());
     state
@@ -245,4 +248,106 @@ fn machines_sidebar_filters_every_endpoint() {
         .map(|(_, endpoint_id, pane_id)| (endpoint_id.clone(), pane_id.clone()))
         .collect::<Vec<_>>();
     assert_eq!(agents, [(remote, "pane_1".to_owned())]);
+}
+
+/// The sidebar heading row without the trailing divider column.
+fn heading_row(state: &mut ClientShellState, cols: u16) -> String {
+    let frame = state.compose(cols, 30).expect("composed frame");
+    frame_rows(&frame)[0]
+        .chars()
+        .take(usize::from(state.sidebar_width.saturating_sub(1)))
+        .collect::<String>()
+        .trim_end()
+        .to_owned()
+}
+
+fn tab_hits(state: &ClientShellState) -> Vec<contexts::ContextTab> {
+    state
+        .hits
+        .context_tabs
+        .iter()
+        .map(|(_, tab)| tab.clone())
+        .collect()
+}
+
+#[test]
+fn tab_row_replaces_the_spaces_heading_and_registers_hits() {
+    let mut state = contextual_state(None);
+    assert_eq!(heading_row(&mut state, 106), " spaces");
+    assert!(state.hits.context_tabs.is_empty());
+
+    let mut state = contextual_state(Some("context"));
+    assert_eq!(heading_row(&mut state, 106), " + default kund privat all");
+    assert_eq!(
+        tab_hits(&state),
+        [
+            contexts::ContextTab::New,
+            contexts::ContextTab::Default,
+            contexts::ContextTab::Named("kund".into()),
+            contexts::ContextTab::Named("privat".into()),
+            contexts::ContextTab::All,
+        ]
+    );
+    let (default_rect, _) = &state.hits.context_tabs[1];
+    assert_eq!(
+        (default_rect.x, default_rect.y, default_rect.width),
+        (3, 0, 7)
+    );
+    let frame = state.compose(106, 30).expect("composed frame");
+    let buffer = frame.to_ratatui_buffer().expect("buffer");
+    assert!(buffer[(3, 0)]
+        .modifier
+        .contains(ratatui::style::Modifier::BOLD));
+    assert!(!buffer[(11, 0)]
+        .modifier
+        .contains(ratatui::style::Modifier::BOLD));
+
+    // Without mouse capture the row is drawn but not clickable.
+    state.config.mouse_capture = false;
+    assert_eq!(heading_row(&mut state, 106), " + default kund privat all");
+    assert!(state.hits.context_tabs.is_empty());
+}
+
+#[test]
+fn narrow_sidebar_truncates_but_keeps_the_active_tab() {
+    let mut state = contextual_state(Some("context"));
+    for name in ["arkitekturprojektet", "kundleveransen"] {
+        state.contexts.add_known(name);
+    }
+    state
+        .contexts
+        .set_active(contexts::ActiveContext::Named("kundleveransen".into()));
+    state.sidebar_width = 18;
+    let row = heading_row(&mut state, 106);
+    assert!(row.contains("kundleveransen"), "{row:?}");
+    assert!(row.chars().count() <= 17, "{row:?}");
+    let active = state
+        .hits
+        .context_tabs
+        .iter()
+        .find(|(_, tab)| tab == &contexts::ContextTab::Named("kundleveransen".into()))
+        .map(|(rect, _)| *rect)
+        .expect("active tab hit");
+    assert!(active.right() <= 18);
+    assert!(state
+        .hits
+        .context_tabs
+        .iter()
+        .all(|(rect, _)| rect.right() <= 18));
+}
+
+#[test]
+fn machines_sidebar_draws_the_tab_row_too() {
+    let mut state = contextual_state(Some("context"));
+    let profile =
+        crate::client::endpoint::SavedSshEndpoint::new("Build", "dev@build.example", "agents")
+            .expect("saved endpoint");
+    let remote = ClientEndpointId::Ssh(profile.id.clone());
+    state.set_endpoint_catalog(&[profile]);
+    state.set_endpoint_status(&remote, ClientEndpointStatus::Online);
+    let mut projected = contextual_snapshot();
+    projected.boot_id = "remote-boot".into();
+    state.set_endpoint_snapshot(&remote, Box::new(projected));
+    assert_eq!(heading_row(&mut state, 106), " + default kund privat all");
+    assert_eq!(state.hits.context_tabs.len(), 5);
 }
