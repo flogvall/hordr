@@ -77,6 +77,8 @@ impl ClientShellState {
             reveal_navigation_workspace: &mut self.reveal_navigation_workspace,
             dragged_workspace_id: None,
             workspace_drop_indicator_row: None,
+            // fork: context tabs
+            contexts: &self.contexts,
         };
         if let Some(snapshot) = local_snapshot {
             render::render_sidebar(
@@ -233,6 +235,8 @@ impl ClientShellState {
                 reveal_navigation_workspace: &mut self.reveal_navigation_workspace,
                 dragged_workspace_id,
                 workspace_drop_indicator_row,
+                // fork: context tabs
+                contexts: &self.contexts,
             },
         );
         self.hits.panes = surface
