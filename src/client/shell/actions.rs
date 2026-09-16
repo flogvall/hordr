@@ -25,6 +25,8 @@ impl ClientShellState {
                         action,
                         crate::input::KeybindAction::RenameWorkspace
                             | crate::input::KeybindAction::CloseWorkspace
+                            // fork: context tabs
+                            | crate::input::KeybindAction::MoveWorkspaceToContext
                     )
                 {
                     self.receive_endpoint_unavailable(
@@ -96,6 +98,12 @@ impl ClientShellState {
                             outcome,
                         );
                     }
+                    outcome.repaint = true;
+                    return;
+                }
+                // fork: context tabs
+                if action == crate::input::KeybindAction::MoveWorkspaceToContext {
+                    self.open_context_list_for_selected_workspace();
                     outcome.repaint = true;
                     return;
                 }

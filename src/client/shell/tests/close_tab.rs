@@ -108,6 +108,8 @@ fn destructive_buttons_keep_their_own_foreground_when_accent_text_changes() {
             tab_target: None,
             title: "close".into(),
             detail: "confirm".into(),
+            // fork: context tabs
+            remove_context: None,
         }),
         ClientShellOverlay::WorktreeRemove(ClientWorktreeRemoveOverlay {
             workspace_id: "ws_1".into(),

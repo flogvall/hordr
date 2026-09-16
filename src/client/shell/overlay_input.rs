@@ -966,6 +966,11 @@ impl ClientShellState {
                 self.create_context(trimmed, workspace_id, outcome);
                 None
             }
+            // fork: context tabs
+            ClientRenameTarget::RenameContext { name } => {
+                self.rename_context(&name, trimmed, outcome);
+                None
+            }
             ClientRenameTarget::Workspace { workspace_id } => (!trimmed.is_empty()).then(|| {
                 crate::api::schema::Method::WorkspaceRename(
                     crate::api::schema::WorkspaceRenameParams {
@@ -1097,6 +1102,11 @@ impl ClientShellState {
         let Some(ClientShellOverlay::ConfirmClose(confirm)) = self.overlay.take() else {
             return;
         };
+        // fork: context tabs
+        if let Some(name) = confirm.remove_context {
+            self.remove_context(&name, outcome);
+            return;
+        }
         outcome.repaint = true;
         let method = if let Some(target) = confirm.tab_target {
             if target.workspace.endpoint_id != self.active_endpoint_id
@@ -1230,6 +1240,8 @@ impl ClientShellState {
                     "Close workspace?".to_owned()
                 },
                 detail: format!("{} — {scope}", workspace.label),
+                // fork: context tabs
+                remove_context: None,
             },
         ));
         true
