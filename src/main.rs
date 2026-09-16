@@ -157,6 +157,9 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # close_workspace = "prefix+shift+d"
 # previous_workspace = "" # optional, unset by default
 # next_workspace = ""     # optional, unset by default
+# previous_context = ""   # optional, unset by default; needs ui.sidebar.spaces.context_token
+# next_context = ""       # optional, unset by default; needs ui.sidebar.spaces.context_token
+# move_workspace_to_context = "" # optional, unset by default; opens the context list for the selected workspace
 # previous_agent = ""     # optional, unset by default
 # next_agent = ""         # optional, unset by default
 # focus_agent = ""        # optional indexed binding, e.g. "prefix+alt+1..9"
@@ -358,6 +361,11 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Blank rows between space entries. Set to 1 to restore the previous spacing.
 # row_gap = 0
 # rows = [["state_icon", "workspace"], ["branch", "git_status"]]
+# Group spaces into context tabs by a workspace metadata token (set with
+# `herdr workspace report-metadata <workspace> --source <id> --token context=<name>`).
+# Unset keeps the plain "spaces" heading. Spaces without the token belong to default_context.
+# context_token = "context"
+# default_context = "default"
 
 # Background notification popup delivery
 [ui.toast]

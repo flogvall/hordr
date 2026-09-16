@@ -608,6 +608,24 @@
           "description": "Select the next workspace. Unset by default."
         },
         {
+          "key": "keys.previous_context",
+          "type": "keybinding",
+          "default": "unset",
+          "description": "Activate the previous context tab in the Spaces sidebar. Requires ui.sidebar.spaces.context_token. Unset by default."
+        },
+        {
+          "key": "keys.next_context",
+          "type": "keybinding",
+          "default": "unset",
+          "description": "Activate the next context tab in the Spaces sidebar. Requires ui.sidebar.spaces.context_token. Unset by default."
+        },
+        {
+          "key": "keys.move_workspace_to_context",
+          "type": "keybinding",
+          "default": "unset",
+          "description": "Open the context list for the selected workspace. Requires ui.sidebar.spaces.context_token. Unset by default."
+        },
+        {
           "key": "keys.previous_agent",
           "type": "keybinding",
           "default": "unset",
@@ -1077,6 +1095,18 @@
           "type": "list of token rows",
           "default": "[[\"state_icon\", \"workspace\"], [\"branch\", \"git_status\"]]",
           "description": "Expanded Space sidebar layout. Entries may be token strings or inline { token, fg, bold, dim, rules } style tables. Text-valued built-ins and $name metadata tokens accept up to 16 ordered rules using equals, contains, starts_with, gt, or lt; the first match overrides specified styles. Text conditions optionally accept ignore_case for ASCII matching; numeric conditions require full finite numbers. state_icon and git_status accept fixed styles only. At most 16 rows and 16 tokens per row."
+        },
+        {
+          "key": "ui.sidebar.spaces.context_token",
+          "type": "string",
+          "default": "unset",
+          "description": "Workspace metadata token key (1-32 ASCII letters, digits, `_` or `-`) that groups Spaces into context tabs drawn in place of the spaces heading. Set the token with `herdr workspace report-metadata <workspace> --source <id> --token context=<name>`. Unset keeps the plain heading."
+        },
+        {
+          "key": "ui.sidebar.spaces.default_context",
+          "type": "string",
+          "default": "\"default\"",
+          "description": "Name of the built-in context tab that holds Spaces without the context token. It cannot be renamed or removed from the sidebar."
         },
         {
           "key": "ui.accent",

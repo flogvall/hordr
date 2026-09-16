@@ -136,6 +136,16 @@ pub(crate) fn keybind_help_groups(
                     indexed_label(&keybinds.switch_workspace),
                     "switch workspace 1-9",
                 ),
+                // fork: context tabs
+                entry(
+                    binding_label(&keybinds.previous_context),
+                    "previous context",
+                ),
+                entry(binding_label(&keybinds.next_context), "next context"),
+                entry(
+                    binding_label(&keybinds.move_workspace_to_context),
+                    "move workspace to context",
+                ),
                 entry(binding_label(&keybinds.previous_agent), "previous agent"),
                 entry(binding_label(&keybinds.next_agent), "next agent"),
                 entry(indexed_label(&keybinds.focus_agent), "focus agent 1-9"),

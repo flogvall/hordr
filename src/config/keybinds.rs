@@ -333,6 +333,10 @@ pub struct Keybinds {
     pub open_notification_target: ActionKeybinds,
     pub previous_workspace: ActionKeybinds,
     pub next_workspace: ActionKeybinds,
+    // fork: context tabs
+    pub previous_context: ActionKeybinds,
+    pub next_context: ActionKeybinds,
+    pub move_workspace_to_context: ActionKeybinds,
     pub previous_agent: ActionKeybinds,
     pub next_agent: ActionKeybinds,
     pub focus_agent: Vec<IndexedKeybind>,
@@ -501,6 +505,10 @@ impl Config {
             open_notification_target: empty_action!(),
             previous_workspace: empty_action!(),
             next_workspace: empty_action!(),
+            // fork: context tabs
+            previous_context: empty_action!(),
+            next_context: empty_action!(),
+            move_workspace_to_context: empty_action!(),
             previous_agent: empty_action!(),
             next_agent: empty_action!(),
             focus_agent: Vec::new(),
@@ -633,6 +641,14 @@ impl Config {
             );
             apply_action!(keybinds.previous_workspace, previous_workspace, source);
             apply_action!(keybinds.next_workspace, next_workspace, source);
+            // fork: context tabs
+            apply_action!(keybinds.previous_context, previous_context, source);
+            apply_action!(keybinds.next_context, next_context, source);
+            apply_action!(
+                keybinds.move_workspace_to_context,
+                move_workspace_to_context,
+                source
+            );
             apply_action!(keybinds.previous_agent, previous_agent, source);
             apply_action!(keybinds.next_agent, next_agent, source);
             apply_indexed!(
