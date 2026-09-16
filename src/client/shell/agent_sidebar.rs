@@ -20,7 +20,13 @@ pub(super) struct AgentRow {
 pub(super) fn ordered_agent_pane_ids(
     snapshot: &ClientShellSnapshot,
     sort: crate::config::AgentPanelSortConfig,
+    // fork: context tabs
+    context: Option<contexts::ContextView<'_>>,
 ) -> Vec<String> {
+    // fork: context tabs
+    let visible = |agent: &crate::protocol::ClientShellAgent| {
+        context.is_none_or(|context| context.workspace_id_visible(snapshot, &agent.workspace_id))
+    };
     if snapshot.agent_view_label.is_some() {
         return snapshot
             .agent_order
@@ -29,12 +35,16 @@ pub(super) fn ordered_agent_pane_ids(
                 snapshot
                     .agents
                     .iter()
-                    .any(|agent| agent.pane_id == pane_id.as_str())
+                    .any(|agent| agent.pane_id == pane_id.as_str() && visible(agent))
             })
             .cloned()
             .collect();
     }
-    let mut agents = snapshot.agents.iter().collect::<Vec<_>>();
+    let mut agents = snapshot
+        .agents
+        .iter()
+        .filter(|agent| visible(agent))
+        .collect::<Vec<_>>();
     if sort == crate::config::AgentPanelSortConfig::Priority {
         agents.sort_by_key(|agent| {
             (
@@ -54,6 +64,8 @@ pub(super) fn render_agent_panel(
     area: Rect,
     snapshot: &ClientShellSnapshot,
     config: &ClientShellConfig,
+    // fork: context tabs
+    context: Option<contexts::ContextView<'_>>,
     agent_scroll: &mut usize,
     hits: &mut ShellHitMap,
 ) {
@@ -67,7 +79,7 @@ pub(super) fn render_agent_panel(
         return;
     }
 
-    let rows = agent_rows(snapshot, config, None);
+    let rows = agent_rows(snapshot, config, None, context);
     render_agent_list(
         buffer,
         area,
@@ -238,8 +250,10 @@ pub(super) fn agent_rows(
     snapshot: &ClientShellSnapshot,
     config: &ClientShellConfig,
     machine: Option<&str>,
+    // fork: context tabs
+    context: Option<contexts::ContextView<'_>>,
 ) -> Vec<AgentRow> {
-    ordered_agent_pane_ids(snapshot, config.agent_panel_sort)
+    ordered_agent_pane_ids(snapshot, config.agent_panel_sort, context)
         .into_iter()
         .filter_map(|pane_id| agent_row(snapshot, &pane_id, config, machine))
         .collect()
