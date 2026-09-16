@@ -461,6 +461,14 @@ pub struct SpacesSidebarConfig {
     #[serde(deserialize_with = "deserialize_sidebar_rows")]
     pub rows: SpaceSidebarRows,
     pub row_gap: u16,
+    // fork: context tabs
+    /// Workspace metadata token key that groups Spaces into context tabs. Unset disables the tab row.
+    #[serde(deserialize_with = "deserialize_context_token")]
+    pub context_token: Option<String>,
+    // fork: context tabs
+    /// Name of the built-in context that holds Spaces without the context token.
+    #[serde(deserialize_with = "deserialize_context_name")]
+    pub default_context: String,
 }
 
 impl Default for SpacesSidebarConfig {
@@ -471,8 +479,53 @@ impl Default for SpacesSidebarConfig {
                 vec![SpaceSidebarToken::Branch, SpaceSidebarToken::GitStatus],
             ],
             row_gap: DEFAULT_SIDEBAR_ROW_GAP,
+            context_token: None,
+            default_context: DEFAULT_CONTEXT_NAME.to_owned(),
         }
     }
+}
+
+// fork: context tabs
+pub const DEFAULT_CONTEXT_NAME: &str = "default";
+
+// fork: context tabs
+/// Validates a metadata token key the same way the server does for `report_metadata`.
+pub fn metadata_token_key_is_valid(key: &str) -> bool {
+    !key.is_empty()
+        && key.len() <= 32
+        && key
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-'))
+}
+
+// fork: context tabs
+fn deserialize_context_token<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Option::<String>::deserialize(deserializer)?;
+    match value {
+        Some(key) if !metadata_token_key_is_valid(&key) => Err(serde::de::Error::custom(format!(
+            "invalid context token key `{key}`; use 1-32 ASCII letters, digits, `_` or `-`"
+        ))),
+        Some(key) => Ok(Some(key)),
+        None => Ok(None),
+    }
+}
+
+// fork: context tabs
+fn deserialize_context_name<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = String::deserialize(deserializer)?;
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(serde::de::Error::custom(
+            "default_context must not be empty",
+        ));
+    }
+    Ok(trimmed.to_owned())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize, Serialize)]
@@ -725,5 +778,63 @@ rows = [[{ token = "$status", rules = [{ contains = "error", bold = true }] }]]
                 "accepted key {key:?}"
             );
         }
+    }
+
+    // fork: context tabs
+    #[test]
+    fn context_tabs_are_off_by_default() {
+        let config = SpacesSidebarConfig::default();
+        assert_eq!(config.context_token, None);
+        assert_eq!(config.default_context, DEFAULT_CONTEXT_NAME);
+        assert_eq!(
+            crate::config::Config::default()
+                .ui
+                .sidebar
+                .spaces
+                .context_token,
+            None
+        );
+    }
+
+    // fork: context tabs
+    #[test]
+    fn parses_context_token_and_default_context() {
+        let config: crate::config::Config = toml::from_str(
+            r#"
+[ui.sidebar.spaces]
+context_token = "context"
+default_context = "  work  "
+"#,
+        )
+        .expect("context tab config");
+
+        assert_eq!(
+            config.ui.sidebar.spaces.context_token.as_deref(),
+            Some("context")
+        );
+        assert_eq!(config.ui.sidebar.spaces.default_context, "work");
+        // The rest of the section keeps its defaults.
+        assert_eq!(
+            config.ui.sidebar.spaces.rows,
+            SpacesSidebarConfig::default().rows
+        );
+    }
+
+    // fork: context tabs
+    #[test]
+    fn rejects_invalid_context_token_keys_and_empty_default_context() {
+        for token in ["", "$context", "has space", "x".repeat(33).as_str()] {
+            let input = format!("[ui.sidebar.spaces]\ncontext_token = {token:?}\n");
+            assert!(
+                toml::from_str::<crate::config::Config>(&input).is_err(),
+                "accepted context token {token:?}"
+            );
+        }
+        assert!(toml::from_str::<crate::config::Config>(
+            "[ui.sidebar.spaces]\ndefault_context = \" \"\n"
+        )
+        .is_err());
+        assert!(metadata_token_key_is_valid("jj_status"));
+        assert!(!metadata_token_key_is_valid("jj status"));
     }
 }
