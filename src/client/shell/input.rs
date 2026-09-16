@@ -878,6 +878,8 @@ impl ClientShellState {
                     &self.endpoints,
                     &self.active_endpoint_id,
                     self.config.agent_panel_sort,
+                    // fork: context tabs
+                    Some(&self.contexts),
                 )
                 .get(*index)
                 .is_some()

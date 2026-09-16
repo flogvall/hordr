@@ -39,6 +39,29 @@ impl ClientShellState {
         self.navigation_target(&self.active_endpoint_id, workspace_id)
     }
 
+    // fork: context tabs
+    /// The focused workspace when the active context shows it, else the first visible one,
+    /// so navigate mode never starts on a hidden row.
+    pub(super) fn visible_navigation_target(&self) -> Option<WorkspaceNavigationTarget> {
+        let snapshot = self.snapshot.as_deref()?;
+        let entries = self.navigation_workspace_entries(snapshot);
+        let visible = |workspace_id: &str| {
+            entries
+                .iter()
+                .any(|entry| snapshot.workspaces[entry.index].workspace_id == workspace_id)
+        };
+        let workspace_id = snapshot
+            .focused_workspace_id
+            .as_deref()
+            .filter(|workspace_id| visible(workspace_id))
+            .or_else(|| {
+                entries
+                    .first()
+                    .map(|entry| snapshot.workspaces[entry.index].workspace_id.as_str())
+            })?;
+        self.navigation_target(&self.active_endpoint_id, workspace_id)
+    }
+
     pub(super) fn navigation_target_valid(&self, target: &WorkspaceNavigationTarget) -> bool {
         self.endpoints.iter().any(|endpoint| {
             endpoint.endpoint_id == target.endpoint_id
@@ -90,7 +113,12 @@ impl ClientShellState {
                     self.collapsed_groups_for_endpoint(&endpoint.endpoint_id)
                         .unwrap_or(&empty_collapsed_groups)
                 };
-                render::workspace_entries(snapshot, collapsed_groups)
+                // fork: context tabs
+                render::workspace_entries(
+                    snapshot,
+                    collapsed_groups,
+                    self.contexts.view(&endpoint.endpoint_id),
+                )
             };
             for entry in entries {
                 targets.push(WorkspaceNavigationTarget {

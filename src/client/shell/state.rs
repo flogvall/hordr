@@ -1162,13 +1162,16 @@ impl ClientShellState {
         snapshot: &ClientShellSnapshot,
     ) -> Vec<WorkspaceEntry> {
         let empty_collapsed_groups = HashSet::new();
+        // fork: context tabs
+        let context = self.contexts.view(&self.active_endpoint_id);
         if self.mobile_layout_active() {
-            render::workspace_entries(snapshot, &empty_collapsed_groups)
+            render::workspace_entries(snapshot, &empty_collapsed_groups, context)
         } else {
             render::workspace_entries(
                 snapshot,
                 self.collapsed_groups_for_endpoint(&self.active_endpoint_id)
                     .unwrap_or(&empty_collapsed_groups),
+                context,
             )
         }
     }
@@ -1493,6 +1496,20 @@ impl ClientShellState {
                 .as_deref()
                 .and_then(|id| self.navigation_target(&self.active_endpoint_id, id));
             self.reveal_mobile_workspace = self.mobile_layout_active();
+        }
+        // fork: context tabs
+        if self.mode == ClientShellMode::Navigate
+            && self.navigate_workspace_id.as_ref().is_some_and(|target| {
+                target.endpoint_id == self.active_endpoint_id
+                    && self
+                        .contexts
+                        .view(&self.active_endpoint_id)
+                        .is_some_and(|view| {
+                            !view.workspace_id_visible(&snapshot, &target.workspace_id)
+                        })
+            })
+        {
+            self.navigate_workspace_id = self.visible_navigation_target();
         }
         let pane_exists =
             |pane_id: &String| snapshot.panes.iter().any(|pane| &pane.pane_id == pane_id);

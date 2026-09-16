@@ -530,7 +530,12 @@ impl ClientShellState {
         let collapsed_groups = self
             .collapsed_groups_for_endpoint(&self.active_endpoint_id)
             .unwrap_or(&empty_collapsed_groups);
-        let entries = render::workspace_entries(snapshot, collapsed_groups);
+        // fork: context tabs
+        let entries = render::workspace_entries(
+            snapshot,
+            collapsed_groups,
+            self.contexts.view(&self.active_endpoint_id),
+        );
         let last_hit = self
             .hits
             .workspaces

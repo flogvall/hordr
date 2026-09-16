@@ -111,7 +111,7 @@ pub(crate) fn render_collapsed_sidebar(
         detail_area.width,
         detail_area.height.saturating_sub(1),
     );
-    for (index, pane_id) in super::ordered_agent_pane_ids(snapshot, config.agent_panel_sort)
+    for (index, pane_id) in super::ordered_agent_pane_ids(snapshot, config.agent_panel_sort, None)
         .into_iter()
         .take(detail_content.height as usize)
         .enumerate()
@@ -210,7 +210,12 @@ pub(crate) fn render_sidebar(
             .add_modifier(Modifier::BOLD),
     );
 
-    let entries = workspace_entries(snapshot, state.collapsed_groups);
+    // fork: context tabs
+    let entries = workspace_entries(
+        snapshot,
+        state.collapsed_groups,
+        state.contexts.view(state.active_endpoint_id),
+    );
     let body = Rect::new(
         workspace_area.x,
         workspace_area.y.saturating_add(WORKSPACE_HEADER_ROWS),
@@ -419,6 +424,8 @@ pub(crate) fn render_sidebar(
         detail_area,
         snapshot,
         config,
+        // fork: context tabs
+        state.contexts.view(state.active_endpoint_id),
         state.agent_scroll,
         hits,
     );
@@ -442,9 +449,18 @@ pub(crate) fn render_sidebar(
 pub(crate) fn workspace_entries(
     snapshot: &ClientShellSnapshot,
     collapsed_groups: &HashSet<String>,
+    // fork: context tabs
+    context: Option<contexts::ContextView<'_>>,
 ) -> Vec<WorkspaceEntry> {
+    // fork: context tabs
+    let visible = |workspace: &ClientShellWorkspace| {
+        context.is_none_or(|context| context.workspace_visible(workspace))
+    };
     let mut members = HashMap::<&str, Vec<usize>>::new();
     for (index, workspace) in snapshot.workspaces.iter().enumerate() {
+        if !visible(workspace) {
+            continue;
+        }
         if let Some(worktree) = &workspace.worktree {
             members.entry(&worktree.key).or_default().push(index);
         }
@@ -465,6 +481,9 @@ pub(crate) fn workspace_entries(
     let mut emitted = HashSet::<&str>::new();
     let mut entries = Vec::new();
     for (index, workspace) in snapshot.workspaces.iter().enumerate() {
+        if !visible(workspace) {
+            continue;
+        }
         let Some(worktree) = workspace
             .worktree
             .as_ref()

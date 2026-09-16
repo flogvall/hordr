@@ -247,6 +247,8 @@ pub(super) struct ShellRenderState<'a> {
     pub(super) reveal_navigation_workspace: &'a mut bool,
     pub(super) dragged_workspace_id: Option<&'a str>,
     pub(super) workspace_drop_indicator_row: Option<u16>,
+    // fork: context tabs
+    pub(super) contexts: &'a contexts::ContextState,
 }
 
 pub(super) fn render_shell(

@@ -144,7 +144,8 @@ impl ClientShellState {
                     self.mobile_switcher_scroll = 0;
                     self.reveal_mobile_workspace = false;
                     self.mode = ClientShellMode::Navigate;
-                    self.navigate_workspace_id = self.focused_navigation_target();
+                    // fork: context tabs
+                    self.navigate_workspace_id = self.visible_navigation_target();
                     self.reveal_navigation_workspace = true;
                     outcome.repaint = true;
                     return;
@@ -937,6 +938,8 @@ impl ClientShellState {
                 let agents = super::agent_sidebar::ordered_agent_pane_ids(
                     snapshot,
                     self.config.agent_panel_sort,
+                    // fork: context tabs
+                    self.contexts.view(&self.active_endpoint_id),
                 );
                 Some(Method::PaneFocus(PaneTarget {
                     pane_id: agents.get(index)?.clone(),
@@ -946,6 +949,8 @@ impl ClientShellState {
                 let agents = super::agent_sidebar::ordered_agent_pane_ids(
                     snapshot,
                     self.config.agent_panel_sort,
+                    // fork: context tabs
+                    self.contexts.view(&self.active_endpoint_id),
                 );
                 if agents.is_empty() {
                     return None;
