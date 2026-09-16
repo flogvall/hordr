@@ -323,6 +323,10 @@ pub(super) enum ClientRenameTarget {
     NewContext {
         workspace_id: Option<String>,
     },
+    // fork: context tabs
+    RenameContext {
+        name: String,
+    },
 }
 
 #[derive(Debug)]
@@ -533,6 +537,13 @@ pub(super) enum ClientContextMenuAction {
     Zoom,
     ToggleRightClickPassthrough,
     ClosePane,
+    // fork: context tabs
+    MoveWorkspaceToContext,
+    /// Index into `ClientContextMenuTarget::WorkspaceContextList::contexts`.
+    MoveToContext(usize),
+    NewContextForWorkspace,
+    RenameContext,
+    RemoveContext,
 }
 
 #[derive(Debug)]
@@ -544,6 +555,18 @@ pub(super) enum ClientContextMenuTarget {
         has_worktree_children: bool,
         close_group: bool,
         collapsed: bool,
+        // fork: context tabs
+        context_enabled: bool,
+    },
+    // fork: context tabs
+    /// Second-level list opened from "Move to context..."; `contexts[0]` is the default.
+    WorkspaceContextList {
+        workspace_id: String,
+        contexts: Vec<String>,
+    },
+    // fork: context tabs
+    ContextTab {
+        name: String,
     },
     Tab {
         tab_id: String,
@@ -567,7 +590,8 @@ pub(super) struct ClientContextMenuOverlay {
 }
 
 pub(super) struct ClientContextMenuItem {
-    pub(super) label: &'static str,
+    // fork: context tabs — owned labels for context names
+    pub(super) label: std::borrow::Cow<'static, str>,
     pub(super) action: ClientContextMenuAction,
 }
 
@@ -585,6 +609,9 @@ pub(super) struct ClientConfirmCloseOverlay {
     pub(super) tab_target: Option<ClientTabCloseConfirmation>,
     pub(super) title: String,
     pub(super) detail: String,
+    // fork: context tabs
+    /// When set, confirming removes this context instead of closing `workspace_id`.
+    pub(super) remove_context: Option<String>,
 }
 
 #[derive(Debug)]
