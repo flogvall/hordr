@@ -252,13 +252,18 @@ impl ContextState {
             .collect()
     }
 
-    pub(super) fn cycle_active(&mut self, delta: isize) -> bool {
+    /// The tab `delta` steps away from the active one, wrapping around.
+    pub(super) fn next_active(&self, delta: isize) -> ActiveContext {
         let targets = self.selectable();
         let Some(current) = targets.iter().position(|target| target == &self.active) else {
-            return self.set_active(ActiveContext::Default);
+            return ActiveContext::Default;
         };
         let next = (current as isize + delta).rem_euclid(targets.len() as isize) as usize;
-        let target = targets[next].clone();
+        targets[next].clone()
+    }
+
+    pub(super) fn cycle_active(&mut self, delta: isize) -> bool {
+        let target = self.next_active(delta);
         self.set_active(target)
     }
 
@@ -667,6 +672,150 @@ pub(super) fn layout_tab_row(labels: &[&str], active: usize, width: u16) -> Vec<
         });
     }
     cells
+}
+
+impl super::ClientShellState {
+    /// Switches the active tab; the list scrolls back to the top so the selection shows.
+    pub(super) fn activate_context(
+        &mut self,
+        active: ActiveContext,
+        outcome: &mut super::ClientShellInput,
+    ) {
+        if !self.contexts.enabled() {
+            return;
+        }
+        if self.contexts.set_active(active) {
+            self.workspace_scroll = 0;
+            self.agent_scroll = 0;
+            self.reveal_focused_workspace = true;
+            self.persist_chrome_preferences(outcome);
+        }
+        if self.mode == super::ClientShellMode::Navigate {
+            self.navigate_workspace_id = self.visible_navigation_target();
+            self.reveal_navigation_workspace = true;
+        }
+        outcome.repaint = true;
+    }
+
+    pub(super) fn cycle_context(&mut self, delta: isize, outcome: &mut super::ClientShellInput) {
+        if !self.contexts.enabled() {
+            return;
+        }
+        let next = self.contexts.next_active(delta);
+        self.activate_context(next, outcome);
+    }
+
+    pub(super) fn handle_context_tab_click(
+        &mut self,
+        tab: ContextTab,
+        outcome: &mut super::ClientShellInput,
+    ) {
+        match tab.to_active() {
+            Some(active) => self.activate_context(active, outcome),
+            None => {
+                self.open_new_context_overlay(None);
+                outcome.repaint = true;
+            }
+        }
+    }
+
+    /// Reuses the inline rename prompt to ask for a context name.
+    pub(super) fn open_new_context_overlay(&mut self, workspace_id: Option<String>) {
+        self.overlay = Some(super::ClientShellOverlay::Rename(
+            super::ClientRenameOverlay {
+                title: "new context",
+                input: super::TextEditor::new("", true),
+                target: super::ClientRenameTarget::NewContext { workspace_id },
+            },
+        ));
+    }
+
+    fn accept_context_name(&mut self, raw: &str) -> Option<String> {
+        let name = ContextState::normalize_name(raw)?;
+        if self.contexts.is_reserved_name(&name) {
+            self.receive_endpoint_unavailable(format!(
+                "\"{name}\" is a built-in tab; choose another context name"
+            ));
+            return None;
+        }
+        Some(name)
+    }
+
+    /// Registers a context typed in the prompt. With a workspace it moves that
+    /// workspace into the new context; without one it activates the new tab.
+    pub(super) fn create_context(
+        &mut self,
+        raw_name: &str,
+        workspace_id: Option<String>,
+        outcome: &mut super::ClientShellInput,
+    ) {
+        outcome.repaint = true;
+        let Some(name) = self.accept_context_name(raw_name) else {
+            return;
+        };
+        self.contexts.add_known(&name);
+        match workspace_id {
+            Some(workspace_id) => {
+                self.push_context_report(workspace_id, Some(name), outcome);
+                self.persist_chrome_preferences(outcome);
+            }
+            None => self.activate_context(ActiveContext::Named(name), outcome),
+        }
+    }
+
+    /// Renames a context and rewrites the token on every workspace that carries it.
+    pub(super) fn rename_context(
+        &mut self,
+        old: &str,
+        raw_new: &str,
+        outcome: &mut super::ClientShellInput,
+    ) {
+        outcome.repaint = true;
+        let Some(new) = self.accept_context_name(raw_new) else {
+            return;
+        };
+        if new == old {
+            return;
+        }
+        let endpoint_id = self.active_endpoint_id.clone();
+        let members = self
+            .snapshot
+            .as_deref()
+            .map(|snapshot| {
+                self.contexts
+                    .workspaces_in_context(&endpoint_id, snapshot, old)
+            })
+            .unwrap_or_default();
+        if !self.contexts.rename_known(old, &new) {
+            return;
+        }
+        for workspace_id in members {
+            self.push_context_report(workspace_id, Some(new.clone()), outcome);
+        }
+        self.persist_chrome_preferences(outcome);
+    }
+
+    /// Sends `workspace.create`; under a named tab the reply is tagged so the new
+    /// workspace joins that context as soon as its id is known.
+    pub(super) fn push_workspace_create(
+        &mut self,
+        params: crate::api::schema::WorkspaceCreateParams,
+        outcome: &mut super::ClientShellInput,
+    ) {
+        let kind = match self.contexts.active().named() {
+            Some(context) if self.contexts.enabled() => {
+                super::PendingEndpointKind::WorkspaceCreateInContext {
+                    context: context.to_owned(),
+                }
+            }
+            _ => super::PendingEndpointKind::Generic,
+        };
+        self.push_endpoint_method_with_kind(
+            crate::api::schema::Method::WorkspaceCreate(params),
+            kind,
+            outcome,
+        );
+    }
 }
 
 /// Draws the tab row in place of the Spaces heading and registers one hit rect per tab.
