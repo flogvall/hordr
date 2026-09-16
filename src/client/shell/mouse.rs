@@ -1668,6 +1668,11 @@ impl ClientShellState {
                         else {
                             return;
                         };
+                        // fork: context tabs
+                        if let Some(name) = confirm.remove_context {
+                            self.remove_context(&name, outcome);
+                            return;
+                        }
                         self.push_endpoint_method(
                             crate::api::schema::Method::WorkspaceClose(
                                 crate::api::schema::WorkspaceCloseParams {
@@ -1788,6 +1793,18 @@ impl ClientShellState {
                     }
                 }
                 if !self.config.mouse_capture {
+                    return;
+                }
+                // fork: context tabs
+                if let Some(tab) = self
+                    .hits
+                    .context_tabs
+                    .iter()
+                    .find(|(rect, _)| super::contains(*rect, point))
+                    .map(|(_, tab)| tab.clone())
+                {
+                    outcome.repaint |=
+                        self.open_context_tab_context_menu(&tab, mouse.column, mouse.row);
                     return;
                 }
                 let workspace_id = (!self.sidebar_collapsed)

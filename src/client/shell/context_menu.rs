@@ -4,8 +4,12 @@ impl ClientContextMenuOverlay {
     pub(super) fn items(&self) -> Vec<ClientContextMenuItem> {
         use ClientContextMenuAction as Action;
 
-        let item = |label, action| ClientContextMenuItem { label, action };
-        match &self.target {
+        let item = |label: &'static str, action| ClientContextMenuItem {
+            label: label.into(),
+            action,
+        };
+        // fork: context tabs — the Workspace arms get an extra item appended below
+        let mut items = match &self.target {
             ClientContextMenuTarget::Workspace { is_git: false, .. } => {
                 vec![item("Rename", Action::Rename), item("Close", Action::Close)]
             }
@@ -75,7 +79,34 @@ impl ClientContextMenuOverlay {
                 ]);
                 items
             }
+            // fork: context tabs
+            ClientContextMenuTarget::WorkspaceContextList { contexts, .. } => contexts
+                .iter()
+                .enumerate()
+                .map(|(index, name)| ClientContextMenuItem {
+                    label: name.clone().into(),
+                    action: Action::MoveToContext(index),
+                })
+                .chain(std::iter::once(item(
+                    "New context...",
+                    Action::NewContextForWorkspace,
+                )))
+                .collect(),
+            // fork: context tabs
+            ClientContextMenuTarget::ContextTab { .. } => vec![
+                item("Rename...", Action::RenameContext),
+                item("Remove context", Action::RemoveContext),
+            ],
+        };
+        // fork: context tabs
+        if let ClientContextMenuTarget::Workspace {
+            context_enabled: true,
+            ..
+        } = &self.target
+        {
+            items.push(item("Move to context...", Action::MoveWorkspaceToContext));
         }
+        items
     }
 }
 
@@ -116,11 +147,56 @@ impl ClientShellState {
                 is_linked_worktree: worktree.is_some_and(|worktree| worktree.is_linked_worktree),
                 has_worktree_children,
                 collapsed,
+                // fork: context tabs
+                context_enabled: self.contexts.enabled(),
             },
             x,
             y,
             highlighted: 0,
         }));
+    }
+
+    // fork: context tabs
+    /// Second-level menu listing every known context for one workspace.
+    pub(super) fn open_workspace_context_list_menu(
+        &mut self,
+        workspace_id: String,
+        x: u16,
+        y: u16,
+    ) {
+        let mut contexts = vec![self.contexts.default_name().to_owned()];
+        contexts.extend(self.contexts.known().map(str::to_owned));
+        self.overlay = Some(ClientShellOverlay::ContextMenu(ClientContextMenuOverlay {
+            target: ClientContextMenuTarget::WorkspaceContextList {
+                workspace_id,
+                contexts,
+            },
+            x,
+            y,
+            highlighted: 0,
+        }));
+    }
+
+    // fork: context tabs
+    /// Right-click menu for a user-created context tab; built-in tabs have none.
+    pub(super) fn open_context_tab_context_menu(
+        &mut self,
+        tab: &contexts::ContextTab,
+        x: u16,
+        y: u16,
+    ) -> bool {
+        let Some(name) = tab.named() else {
+            return false;
+        };
+        self.overlay = Some(ClientShellOverlay::ContextMenu(ClientContextMenuOverlay {
+            target: ClientContextMenuTarget::ContextTab {
+                name: name.to_owned(),
+            },
+            x,
+            y,
+            highlighted: 0,
+        }));
+        true
     }
 
     pub(super) fn open_tab_context_menu(&mut self, tab_id: String, x: u16, y: u16) {
@@ -191,9 +267,28 @@ impl ClientShellState {
             outcome.repaint = true;
             return;
         };
+        // fork: context tabs — the context list re-opens at the same anchor
+        let (x, y) = (menu.x, menu.y);
         match menu.target {
+            // fork: context tabs
+            ClientContextMenuTarget::Workspace { workspace_id, .. }
+                if action == ClientContextMenuAction::MoveWorkspaceToContext =>
+            {
+                self.open_workspace_context_list_menu(workspace_id, x, y)
+            }
             ClientContextMenuTarget::Workspace { workspace_id, .. } => {
                 self.activate_workspace_context_action(workspace_id, action, outcome)
+            }
+            // fork: context tabs
+            ClientContextMenuTarget::WorkspaceContextList {
+                workspace_id,
+                contexts,
+            } => {
+                self.activate_workspace_context_list_action(workspace_id, contexts, action, outcome)
+            }
+            // fork: context tabs
+            ClientContextMenuTarget::ContextTab { name } => {
+                self.activate_context_tab_action(name, action, outcome)
             }
             ClientContextMenuTarget::Tab {
                 tab_id,
@@ -460,6 +555,55 @@ impl ClientShellState {
                 self.push_endpoint_method(Method::PaneClose(PaneTarget { pane_id }), outcome)
             }
             _ => {}
+        }
+    }
+
+    // fork: context tabs
+    fn activate_workspace_context_list_action(
+        &mut self,
+        workspace_id: String,
+        contexts: Vec<String>,
+        action: ClientContextMenuAction,
+        outcome: &mut ClientShellInput,
+    ) {
+        match action {
+            // The first entry is the default context: clearing the token moves it there.
+            ClientContextMenuAction::MoveToContext(0) => {
+                self.push_context_report(workspace_id, None, outcome);
+            }
+            ClientContextMenuAction::MoveToContext(index) => {
+                if let Some(name) = contexts.get(index) {
+                    self.push_context_report(workspace_id, Some(name.clone()), outcome);
+                }
+            }
+            ClientContextMenuAction::NewContextForWorkspace => {
+                self.open_new_context_overlay(Some(workspace_id));
+            }
+            _ => {}
+        }
+    }
+
+    // fork: context tabs
+    fn activate_context_tab_action(
+        &mut self,
+        name: String,
+        action: ClientContextMenuAction,
+        outcome: &mut ClientShellInput,
+    ) {
+        match action {
+            ClientContextMenuAction::RenameContext => {
+                self.overlay = Some(ClientShellOverlay::Rename(ClientRenameOverlay {
+                    title: "rename context",
+                    input: TextEditor::new(&name, false),
+                    target: ClientRenameTarget::RenameContext { name },
+                }));
+            }
+            ClientContextMenuAction::RemoveContext => {
+                self.open_confirm_remove_context_overlay(name);
+            }
+            _ => {
+                outcome.repaint = true;
+            }
         }
     }
 }

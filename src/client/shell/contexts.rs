@@ -7,10 +7,6 @@
 //! workspace's context so it can be re-reported after the server restarts and
 //! forgets its (unpersisted) metadata tokens.
 
-// The render, input and menu hooks that consume the tab API land in later fork
-// commits; keep this state-only commit clippy-clean until then.
-#![allow(dead_code)]
-
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 use super::preferences::{
@@ -260,11 +256,6 @@ impl ContextState {
         };
         let next = (current as isize + delta).rem_euclid(targets.len() as isize) as usize;
         targets[next].clone()
-    }
-
-    pub(super) fn cycle_active(&mut self, delta: isize) -> bool {
-        let target = self.next_active(delta);
-        self.set_active(target)
     }
 
     /// Applies the same normalization the server uses for token values.
@@ -795,6 +786,82 @@ impl super::ClientShellState {
         self.persist_chrome_preferences(outcome);
     }
 
+    /// Opens the context list for the navigate highlight or the focused workspace,
+    /// anchored at its sidebar row.
+    pub(super) fn open_context_list_for_selected_workspace(&mut self) {
+        if !self.contexts.enabled() {
+            return;
+        }
+        let Some(workspace_id) = self.workspace_action_id() else {
+            return;
+        };
+        let (x, y) = self
+            .hits
+            .workspaces
+            .iter()
+            .find(|hit| {
+                hit.endpoint_id == self.active_endpoint_id && hit.workspace_id == workspace_id
+            })
+            .map(|hit| (hit.rect.x.saturating_add(2), hit.rect.y.saturating_add(1)))
+            .unwrap_or((1, 1));
+        self.open_workspace_context_list_menu(workspace_id, x, y);
+    }
+
+    /// Reuses the close-workspace confirmation for removing a context.
+    pub(super) fn open_confirm_remove_context_overlay(&mut self, name: String) {
+        let endpoint_id = self.active_endpoint_id.clone();
+        let count = self
+            .snapshot
+            .as_deref()
+            .map(|snapshot| {
+                self.contexts
+                    .workspaces_in_context(&endpoint_id, snapshot, &name)
+                    .len()
+            })
+            .unwrap_or(0);
+        let spaces = if count == 1 {
+            "1 space".to_owned()
+        } else {
+            format!("{count} spaces")
+        };
+        self.overlay = Some(super::ClientShellOverlay::ConfirmClose(
+            super::ClientConfirmCloseOverlay {
+                workspace_id: String::new(),
+                title: "Remove context?".to_owned(),
+                detail: format!("{name} — {spaces} move to {}", self.contexts.default_name()),
+                remove_context: Some(name),
+            },
+        ));
+    }
+
+    /// Removes a context: its workspaces lose the token (and land in default) and the
+    /// tab disappears; default becomes active when the removed tab was.
+    pub(super) fn remove_context(&mut self, name: &str, outcome: &mut super::ClientShellInput) {
+        outcome.repaint = true;
+        let endpoint_id = self.active_endpoint_id.clone();
+        let members = self
+            .snapshot
+            .as_deref()
+            .map(|snapshot| {
+                self.contexts
+                    .workspaces_in_context(&endpoint_id, snapshot, name)
+            })
+            .unwrap_or_default();
+        if !self.contexts.remove_known(name) {
+            return;
+        }
+        for workspace_id in members {
+            self.push_context_report(workspace_id, None, outcome);
+        }
+        self.workspace_scroll = 0;
+        self.agent_scroll = 0;
+        if self.mode == super::ClientShellMode::Navigate {
+            self.navigate_workspace_id = self.visible_navigation_target();
+            self.reveal_navigation_workspace = true;
+        }
+        self.persist_chrome_preferences(outcome);
+    }
+
     /// Sends `workspace.create`; under a named tab the reply is tagged so the new
     /// workspace joins that context as soon as its id is known.
     pub(super) fn push_workspace_create(
@@ -963,11 +1030,15 @@ mod tests {
                 ContextTab::All,
             ]
         );
-        assert!(state.cycle_active(1));
+        let cycle = |state: &mut ContextState, delta: isize| {
+            let next = state.next_active(delta);
+            assert!(state.set_active(next));
+        };
+        cycle(&mut state, 1);
         assert_eq!(state.active(), &ActiveContext::Named("kund".into()));
-        assert!(state.cycle_active(-2));
+        cycle(&mut state, -2);
         assert_eq!(state.active(), &ActiveContext::All);
-        assert!(state.cycle_active(1));
+        cycle(&mut state, 1);
         assert_eq!(state.active(), &ActiveContext::Default);
     }
 

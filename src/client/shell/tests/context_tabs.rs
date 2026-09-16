@@ -620,3 +620,250 @@ fn new_workspace_under_a_named_tab_reports_the_context() {
     })
     .is_empty());
 }
+
+fn right_click(state: &mut ClientShellState, column: u16, row: u16) -> ClientShellInput {
+    state.handle_raw_events(vec![RawInputEvent::Mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Right),
+        column,
+        row,
+        modifiers: KeyModifiers::empty(),
+    })])
+}
+
+fn menu_labels(state: &ClientShellState) -> Vec<String> {
+    match state.overlay.as_ref() {
+        Some(ClientShellOverlay::ContextMenu(menu)) => menu
+            .items()
+            .iter()
+            .map(|item| item.label.to_string())
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn activate_menu_label(state: &mut ClientShellState, label: &str) -> ClientShellInput {
+    let index = menu_labels(state)
+        .iter()
+        .position(|candidate| candidate == label)
+        .unwrap_or_else(|| panic!("menu item {label:?} in {:?}", menu_labels(state)));
+    let mut outcome = ClientShellInput::default();
+    state.activate_context_menu_item(index, &mut outcome);
+    outcome
+}
+
+fn workspace_row(state: &ClientShellState, workspace_id: &str) -> Rect {
+    state
+        .hits
+        .workspaces
+        .iter()
+        .find(|hit| hit.workspace_id == workspace_id)
+        .map(|hit| hit.rect)
+        .expect("visible workspace row")
+}
+
+#[test]
+fn workspace_menu_moves_a_workspace_between_contexts() {
+    // The menu item only exists once the feature is on.
+    let mut state = contextual_state(None);
+    state.compose(106, 30).expect("composed frame");
+    let row = workspace_row(&state, "ws_1");
+    right_click(&mut state, row.x + 2, row.y);
+    assert!(!menu_labels(&state)
+        .iter()
+        .any(|label| label == "Move to context..."));
+    state.overlay = None;
+
+    let mut state = contextual_state(Some("context"));
+    state.contexts.set_active(contexts::ActiveContext::All);
+    state.compose(106, 30).expect("composed frame");
+    let row = workspace_row(&state, "ws_1");
+    right_click(&mut state, row.x + 2, row.y);
+    assert_eq!(
+        menu_labels(&state),
+        [
+            "Rename",
+            "Close",
+            "New worktree",
+            "Open worktree...",
+            "Move to context..."
+        ]
+    );
+    activate_menu_label(&mut state, "Move to context...");
+    assert_eq!(
+        menu_labels(&state),
+        ["default", "kund", "privat", "New context..."]
+    );
+    let outcome = activate_menu_label(&mut state, "kund");
+    assert!(state.overlay.is_none());
+    assert_eq!(
+        report_targets(&outcome),
+        [("ws_1".to_owned(), Some("kund".to_owned()))]
+    );
+
+    // The move shows immediately, before the server confirms it.
+    state.activate_context(
+        contexts::ActiveContext::Default,
+        &mut ClientShellInput::default(),
+    );
+    state.compose(106, 30).expect("composed frame");
+    assert!(visible_workspaces(&state).is_empty());
+    state.activate_context(
+        contexts::ActiveContext::Named("kund".into()),
+        &mut ClientShellInput::default(),
+    );
+    state.compose(106, 30).expect("composed frame");
+    assert_eq!(visible_workspaces(&state), ["ws_1", "ws_2", "ws_4"]);
+
+    // Moving to default clears the token.
+    let row = workspace_row(&state, "ws_2");
+    right_click(&mut state, row.x + 2, row.y);
+    activate_menu_label(&mut state, "Move to context...");
+    let outcome = activate_menu_label(&mut state, "default");
+    assert_eq!(report_targets(&outcome), [("ws_2".to_owned(), None)]);
+    state.compose(106, 30).expect("composed frame");
+    assert_eq!(visible_workspaces(&state), ["ws_1", "ws_4"]);
+}
+
+#[test]
+fn workspace_menu_creates_a_context_for_the_workspace() {
+    let mut state = contextual_state(Some("context"));
+    state.contexts.set_active(contexts::ActiveContext::All);
+    state.compose(106, 30).expect("composed frame");
+    let row = workspace_row(&state, "ws_3");
+    right_click(&mut state, row.x + 2, row.y);
+    activate_menu_label(&mut state, "Move to context...");
+    activate_menu_label(&mut state, "New context...");
+    assert!(matches!(
+        state.overlay,
+        Some(ClientShellOverlay::Rename(ClientRenameOverlay {
+            title: "new context",
+            ..
+        }))
+    ));
+    state.handle_input_bytes(b"ops");
+    let outcome = state.handle_input_bytes(b"\r");
+    assert_eq!(
+        report_targets(&outcome),
+        [("ws_3".to_owned(), Some("ops".to_owned()))]
+    );
+    assert_eq!(
+        state.contexts.known().collect::<Vec<_>>(),
+        ["kund", "ops", "privat"]
+    );
+    // Creating a context for a workspace keeps the current tab.
+    assert_eq!(state.contexts.active(), &contexts::ActiveContext::All);
+}
+
+#[test]
+fn tab_menu_renames_and_removes_contexts() {
+    let mut state = contextual_state(Some("context"));
+    state.compose(106, 30).expect("composed frame");
+    for tab in [
+        contexts::ContextTab::New,
+        contexts::ContextTab::Default,
+        contexts::ContextTab::All,
+    ] {
+        let rect = tab_rect(&state, &tab);
+        right_click(&mut state, rect.x, rect.y);
+        assert!(state.overlay.is_none(), "{tab:?} has no menu");
+    }
+
+    let kund = tab_rect(&state, &contexts::ContextTab::Named("kund".into()));
+    right_click(&mut state, kund.x, kund.y);
+    assert_eq!(menu_labels(&state), ["Rename...", "Remove context"]);
+    activate_menu_label(&mut state, "Rename...");
+    assert!(matches!(
+        state.overlay,
+        Some(ClientShellOverlay::Rename(ClientRenameOverlay {
+            title: "rename context",
+            ..
+        }))
+    ));
+    state.handle_input_bytes(&[0x03]);
+    state.handle_input_bytes(b"kunder");
+    let outcome = state.handle_input_bytes(b"\r");
+    let mut reports = report_targets(&outcome);
+    reports.sort();
+    assert_eq!(
+        reports,
+        [
+            ("ws_2".to_owned(), Some("kunder".to_owned())),
+            ("ws_4".to_owned(), Some("kunder".to_owned())),
+        ]
+    );
+    assert_eq!(
+        state.contexts.known().collect::<Vec<_>>(),
+        ["kunder", "privat"]
+    );
+    state
+        .contexts
+        .set_active(contexts::ActiveContext::Named("kunder".into()));
+    state.compose(106, 30).expect("composed frame");
+    assert_eq!(visible_workspaces(&state), ["ws_2", "ws_4"]);
+
+    // Removing asks for confirmation, clears the token on every member and falls
+    // back to the default tab.
+    let kunder = tab_rect(&state, &contexts::ContextTab::Named("kunder".into()));
+    right_click(&mut state, kunder.x, kunder.y);
+    activate_menu_label(&mut state, "Remove context");
+    assert!(matches!(
+        state.overlay.as_ref(),
+        Some(ClientShellOverlay::ConfirmClose(ClientConfirmCloseOverlay {
+            remove_context: Some(name),
+            ..
+        })) if name == "kunder"
+    ));
+    let cancelled = state.handle_input_bytes(b"\x1b");
+    assert!(cancelled.actions.is_empty());
+    assert_eq!(
+        state.contexts.known().collect::<Vec<_>>(),
+        ["kunder", "privat"]
+    );
+    state.handle_input_bytes(b"\x1b");
+    right_click(&mut state, kunder.x, kunder.y);
+    activate_menu_label(&mut state, "Remove context");
+    let outcome = state.handle_input_bytes(b"\r");
+    let mut reports = report_targets(&outcome);
+    reports.sort();
+    assert_eq!(
+        reports,
+        [("ws_2".to_owned(), None), ("ws_4".to_owned(), None)]
+    );
+    assert_eq!(state.contexts.known().collect::<Vec<_>>(), ["privat"]);
+    assert_eq!(state.contexts.active(), &contexts::ActiveContext::Default);
+    state.compose(106, 30).expect("composed frame");
+    assert_eq!(visible_workspaces(&state), ["ws_1", "ws_2", "ws_4"]);
+    assert_eq!(heading_row(&mut state, 106), " + default privat all");
+}
+
+#[test]
+fn move_key_opens_the_context_list_for_the_navigate_highlight() {
+    let mut config = Config::default();
+    config.ui.sidebar.spaces.context_token = Some("context".into());
+    config.keys.move_workspace_to_context = crate::config::BindingConfig::one("prefix+shift+m");
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    state.set_snapshot(Box::new(contextual_snapshot()));
+    state.set_pane_surface(surface());
+    state.contexts.set_active(contexts::ActiveContext::All);
+    state.compose(106, 30).expect("composed frame");
+    enter_navigation(&mut state);
+    state.handle_input_bytes(b"\x1b[B");
+    assert_eq!(
+        state.navigate_workspace_id,
+        state.navigation_target(&ClientEndpointId::Local, "ws_2")
+    );
+    // Navigate mode resolves prefix bindings on the bare key.
+    state.handle_input_bytes(b"M");
+    assert!(matches!(
+        state.overlay.as_ref(),
+        Some(ClientShellOverlay::ContextMenu(ClientContextMenuOverlay {
+            target: ClientContextMenuTarget::WorkspaceContextList { workspace_id, .. },
+            ..
+        })) if workspace_id == "ws_2"
+    ));
+    let outcome = activate_menu_label(&mut state, "privat");
+    assert_eq!(
+        report_targets(&outcome),
+        [("ws_2".to_owned(), Some("privat".to_owned()))]
+    );
+}
