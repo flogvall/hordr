@@ -301,6 +301,83 @@ impl ClientShellState {
         self.push_endpoint_method_with_kind(method, PendingEndpointKind::Generic, outcome);
     }
 
+    // fork: context tabs
+    /// Sends `workspace.report_metadata` for the context token of one workspace on the
+    /// active endpoint. `None` clears the token (moves the workspace to default). The
+    /// optimistic override is applied immediately and dropped if the request fails.
+    pub(super) fn push_context_report(
+        &mut self,
+        workspace_id: String,
+        context: Option<String>,
+        outcome: &mut ClientShellInput,
+    ) -> bool {
+        let Some(token_key) = self.contexts.token_key().map(str::to_owned) else {
+            return false;
+        };
+        let endpoint_id = self.active_endpoint_id.clone();
+        self.contexts
+            .set_pending(&endpoint_id, &workspace_id, context.clone());
+        let sent = self.push_endpoint_method_with_kind(
+            crate::api::schema::Method::WorkspaceReportMetadata(
+                crate::api::schema::WorkspaceReportMetadataParams {
+                    workspace_id: workspace_id.clone(),
+                    source: contexts::CONTEXT_METADATA_SOURCE.to_owned(),
+                    tokens: HashMap::from([(token_key, context)]),
+                    seq: None,
+                    ttl_ms: None,
+                },
+            ),
+            PendingEndpointKind::ContextReport {
+                workspace_id: workspace_id.clone(),
+            },
+            outcome,
+        );
+        if !sent {
+            self.contexts.clear_pending(&endpoint_id, &workspace_id);
+        }
+        outcome.repaint = true;
+        sent
+    }
+
+    // fork: context tabs
+    /// Flushes context tokens queued by a snapshot (server restart backup) for the active
+    /// endpoint. Returns the outcome to dispatch, or `None` when nothing was sent.
+    pub(crate) fn take_context_token_reports(&mut self) -> Option<ClientShellInput> {
+        let endpoint_id = self.active_endpoint_id.clone();
+        if !self.endpoint_is_online(&endpoint_id) {
+            return None;
+        }
+        let reports = self.contexts.take_queued_reports(&endpoint_id);
+        if reports.is_empty() {
+            return None;
+        }
+        let probe = crate::api::schema::Method::WorkspaceReportMetadata(
+            crate::api::schema::WorkspaceReportMetadataParams {
+                workspace_id: String::new(),
+                source: contexts::CONTEXT_METADATA_SOURCE.to_owned(),
+                tokens: HashMap::new(),
+                seq: None,
+                ttl_ms: None,
+            },
+        );
+        if !self.supports_endpoint_method(&probe) {
+            tracing::debug!(
+                count = reports.len(),
+                "endpoint lacks workspace.report_metadata; dropping context token backups"
+            );
+            for report in &reports {
+                self.contexts
+                    .clear_pending(&endpoint_id, &report.workspace_id);
+            }
+            return None;
+        }
+        let mut outcome = ClientShellInput::default();
+        for report in reports {
+            self.push_context_report(report.workspace_id, report.context, &mut outcome);
+        }
+        Some(outcome)
+    }
+
     pub(super) fn push_endpoint_notice(
         &mut self,
         kind: ClientEndpointNoticeKind,
@@ -532,6 +609,14 @@ impl ClientShellState {
         match pending.kind {
             PendingEndpointKind::Generic => {}
             PendingEndpointKind::PaneLinkResolve { .. } => unreachable!("handled above"),
+            // fork: context tabs
+            PendingEndpointKind::ContextReport { workspace_id } => {
+                if result.is_err() {
+                    let endpoint_id = self.active_endpoint_id.clone();
+                    self.contexts.clear_pending(&endpoint_id, &workspace_id);
+                }
+                return (true, Vec::new());
+            }
             PendingEndpointKind::ProductAnnouncementDismiss { version, id } => {
                 return match result {
                     Ok(_) => (false, Vec::new()),

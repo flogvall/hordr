@@ -662,6 +662,11 @@ pub(super) enum PendingEndpointKind {
         generation: u64,
         session_generation: u64,
     },
+    // fork: context tabs
+    /// `workspace.report_metadata` carrying a context token for one workspace.
+    ContextReport {
+        workspace_id: String,
+    },
 }
 
 pub(super) struct PendingEndpointRequest {
@@ -859,6 +864,8 @@ pub(crate) struct ClientShellState {
     pub(super) tab_press: Option<ClientTabPress>,
     pub(super) collapsed_groups: HashSet<String>,
     pub(super) remote_collapsed_groups: HashMap<ClientEndpointId, HashSet<String>>,
+    // fork: context tabs
+    pub(super) contexts: contexts::ContextState,
     pub(super) workspace_scroll: usize,
     pub(super) agent_scroll: usize,
     pub(super) tab_scroll: usize,
@@ -995,6 +1002,12 @@ impl ClientShellState {
                 .or_default()
                 .extend(saved.collapsed_groups);
         }
+        // fork: context tabs
+        let contexts = contexts::ContextState::new(
+            config.spaces.context_token.clone(),
+            &config.spaces.default_context,
+            preferences.contexts.as_ref(),
+        );
         Self {
             config,
             snapshot: None,
@@ -1021,6 +1034,7 @@ impl ClientShellState {
             tab_press: None,
             collapsed_groups: preferences.collapsed_groups.into_iter().collect(),
             remote_collapsed_groups,
+            contexts,
             workspace_scroll: 0,
             agent_scroll: 0,
             tab_scroll: 0,

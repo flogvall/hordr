@@ -1,5 +1,8 @@
 pub(crate) const REATTACH_COMMAND_ENV_VAR: &str = "HERDR_REATTACH_COMMAND";
 pub(crate) const REMOTE_KEYBINDINGS_ENV_VAR: &str = "HERDR_REMOTE_KEYBINDINGS";
+// fork: context tabs
+/// Stable `target\nsession` key so a `--remote` client can reload its chrome state.
+pub(crate) const REMOTE_ENDPOINT_KEY_ENV_VAR: &str = "HERDR_REMOTE_ENDPOINT_KEY";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RemoteKeybindings {

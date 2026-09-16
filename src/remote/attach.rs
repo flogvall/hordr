@@ -74,6 +74,8 @@ pub(crate) fn run_remote(remote: RemoteLaunch) -> io::Result<()> {
         require_surface_interest,
     )?;
 
+    // fork: context tabs
+    let endpoint_key = format!("{}\n{session_name}", remote.target);
     let _bridge = SshStdioBridge::start(
         remote.target,
         prepared_remote.remote_herdr,
@@ -83,7 +85,12 @@ pub(crate) fn run_remote(remote: RemoteLaunch) -> io::Result<()> {
         false,
     )?;
 
-    run_client_process(&local_socket, &reattach_command, remote.keybindings)
+    run_client_process(
+        &local_socket,
+        &reattach_command,
+        remote.keybindings,
+        &endpoint_key,
+    )
 }
 
 pub(crate) fn prepare_saved_ssh(target: &str, session_name: &str) -> io::Result<()> {
@@ -3030,6 +3037,7 @@ fn run_client_process(
     local_socket: &Path,
     reattach_command: &str,
     keybindings: RemoteKeybindings,
+    endpoint_key: &str,
 ) -> io::Result<()> {
     let exe = std::env::current_exe()?;
     let status = Command::new(exe)
@@ -3040,6 +3048,8 @@ fn run_client_process(
         )
         .env(REATTACH_COMMAND_ENV_VAR, reattach_command)
         .env(REMOTE_KEYBINDINGS_ENV_VAR, keybindings.as_str())
+        // fork: context tabs
+        .env(super::REMOTE_ENDPOINT_KEY_ENV_VAR, endpoint_key)
         .env_remove(crate::api::SOCKET_PATH_ENV_VAR)
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())

@@ -575,6 +575,10 @@ impl ClientShellState {
                 .iter()
                 .any(|agent| &agent.pane_id == pane_id)
         });
+        // fork: context tabs
+        if self.contexts.observe_snapshot(endpoint_id, &snapshot) {
+            self.persist_chrome_preferences(&mut ClientShellInput::default());
+        }
         let endpoint = &mut self.endpoints[index];
         endpoint.agent_recency = recency;
         endpoint.snapshot_generation = generation;
