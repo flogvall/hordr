@@ -109,6 +109,8 @@ impl ClientShellState {
 
     pub(crate) fn retire_endpoint(&mut self, endpoint_id: &ClientEndpointId) {
         self.retire_endpoint_notifications(endpoint_id);
+        // fork: context tabs
+        self.contexts.forget_endpoint(endpoint_id);
         if let Some(endpoint) = self
             .endpoints
             .iter_mut()

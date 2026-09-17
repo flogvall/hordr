@@ -59,6 +59,8 @@ pub(super) struct ClientShellLayout {
     pub tab_bar: Rect,
     pub mobile_header: Rect,
     pub pane_surface: Rect,
+    // fork: context tabs — full-width row above the sidebar and tab bar
+    pub context_bar: Rect,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1243,6 +1245,8 @@ impl ClientShellState {
             self.sidebar_collapsed,
             self.focused_tab_count(),
             self.sidebar_width,
+            // fork: context tabs
+            self.contexts.enabled(),
         )
     }
 

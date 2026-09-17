@@ -91,6 +91,17 @@ impl ClientShellState {
                 &mut self.hits,
             );
         }
+        // fork: context tabs
+        if layout.context_bar.height > 0 {
+            contexts::render_tab_row(
+                &mut buffer,
+                layout.context_bar,
+                &self.contexts,
+                &self.config.palette,
+                self.config.mouse_capture,
+                &mut self.hits.context_tabs,
+            );
+        }
         if !self.config.mouse_capture {
             self.hits = ShellHitMap::default();
         }

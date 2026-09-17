@@ -469,7 +469,7 @@ Metadata reporters provide values only; styling stays in the local sidebar confi
 Sidebar row settings affect only the expanded desktop sidebar. Collapsed and mobile views keep their compact layouts.
 
 {/* fork: context tabs */}
-Group Spaces into context tabs with a workspace metadata token. Set `context_token` to the token key and the Space heading becomes a tab row: `+`, the default context, every known context, and `all`. Spaces without the token, including every Space that already exists when the setting is enabled, belong to `default_context`, which cannot be renamed or removed. The active tab filters the Space and Agent panels, navigate mode, `prefix+1..9`, next/previous workspace, and agent cycling. All three keys are unset by default.
+Group Spaces into context tabs with a workspace metadata token. Set `context_token` to the token key and a tab row appears across the top of the window, above the sidebar and tab bar: `+`, the default context, every known context, and `all`. Spaces without the token, including every Space that already exists when the setting is enabled, belong to `default_context`. That tab cannot be renamed; it is drawn only while a Space without the token exists or while it is selected, so it disappears on its own once everything has a context and returns when a new untagged Space shows up. The active tab filters the Space and Agent panels, navigate mode, `prefix+1..9`, next/previous workspace, and agent cycling. All three keys are unset by default.
 
 ```toml
 [ui.sidebar.spaces]

@@ -136,6 +136,9 @@ pub(super) struct ContextState {
     /// Last context the server confirmed per workspace, with the server boot that held it.
     assignments: HashMap<WorkspaceKey, Assignment>,
     queued_reports: Vec<QueuedContextReport>,
+    /// Workspaces without the token per endpoint storage key, from the last snapshot.
+    /// The default tab is only drawn while one of them exists (or while it is active).
+    untagged: HashMap<String, Vec<String>>,
 }
 
 impl ContextState {
@@ -152,6 +155,7 @@ impl ContextState {
             pending: HashMap::new(),
             assignments: HashMap::new(),
             queued_reports: Vec::new(),
+            untagged: HashMap::new(),
         };
         let Some(saved) = saved else {
             return state;
@@ -230,14 +234,39 @@ impl ContextState {
         self.known.iter().map(String::as_str)
     }
 
-    /// Tab row order: `+`, default, every known context (sorted), `all`.
+    /// Whether any workspace currently shows under the default tab, counting moves
+    /// that are still in flight.
+    pub(super) fn default_has_members(&self) -> bool {
+        self.untagged.iter().any(|(endpoint, ids)| {
+            ids.iter().any(|id| {
+                self.pending
+                    .get(&(endpoint.clone(), id.clone()))
+                    .is_none_or(|pending| pending.is_none())
+            })
+        }) || self.pending.values().any(|pending| pending.is_none())
+    }
+
+    /// The default tab only takes room while it holds something or is selected; it
+    /// comes back on its own as soon as a workspace without the token appears.
+    pub(super) fn default_tab_visible(&self) -> bool {
+        self.active == ActiveContext::Default || self.default_has_members()
+    }
+
+    /// Tab row order: `+`, default (when visible), every known context (sorted), `all`.
     pub(super) fn tabs(&self) -> Vec<ContextTab> {
         let mut tabs = Vec::with_capacity(self.known.len() + 3);
         tabs.push(ContextTab::New);
-        tabs.push(ContextTab::Default);
+        if self.default_tab_visible() {
+            tabs.push(ContextTab::Default);
+        }
         tabs.extend(self.known.iter().cloned().map(ContextTab::Named));
         tabs.push(ContextTab::All);
         tabs
+    }
+
+    /// Drops what was learned from an endpoint that left the catalog.
+    pub(super) fn forget_endpoint(&mut self, endpoint_id: &ClientEndpointId) {
+        self.untagged.remove(&endpoint_id.storage_key());
     }
 
     /// Selectable targets in tab order (everything except `+`), used by next/previous.
@@ -422,6 +451,15 @@ impl ContextState {
         let endpoint = endpoint_id.storage_key();
         let mut changed = false;
         let mut seen = HashSet::new();
+        self.untagged.insert(
+            endpoint.clone(),
+            snapshot
+                .workspaces
+                .iter()
+                .filter(|workspace| self.token_value(workspace).is_none())
+                .map(|workspace| workspace.workspace_id.clone())
+                .collect(),
+        );
         for workspace in &snapshot.workspaces {
             let key = (endpoint.clone(), workspace.workspace_id.clone());
             seen.insert(key.clone());
@@ -885,7 +923,7 @@ impl super::ClientShellState {
     }
 }
 
-/// Draws the tab row in place of the Spaces heading and registers one hit rect per tab.
+/// Draws the context bar across the top of the client and registers one hit rect per tab.
 pub(super) fn render_tab_row(
     buffer: &mut ratatui::buffer::Buffer,
     area: ratatui::layout::Rect,
@@ -899,6 +937,7 @@ pub(super) fn render_tab_row(
     if area.height == 0 || area.width < 2 {
         return;
     }
+    buffer.set_style(area, Style::default().bg(palette.panel_bg));
     let tabs = state.tabs();
     let default_name = state.default_name();
     let labels = tabs
@@ -918,10 +957,12 @@ pub(super) fn render_tab_row(
         let style = match cell.tab {
             Some(index) if index == active => Style::default()
                 .fg(palette.accent)
+                .bg(palette.panel_bg)
                 .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
-            Some(_) => Style::default().fg(palette.overlay0),
+            Some(_) => Style::default().fg(palette.overlay0).bg(palette.panel_bg),
             None => Style::default()
                 .fg(palette.overlay0)
+                .bg(palette.panel_bg)
                 .add_modifier(Modifier::DIM),
         };
         super::render::put_text(buffer, x, area.y, width, &cell.text, style);
@@ -1036,10 +1077,22 @@ mod tests {
         };
         cycle(&mut state, 1);
         assert_eq!(state.active(), &ActiveContext::Named("kund".into()));
-        cycle(&mut state, -2);
+        // Nothing is untagged, so the default tab drops out once it is not selected.
+        assert!(!state.tabs().contains(&ContextTab::Default));
+        cycle(&mut state, -1);
         assert_eq!(state.active(), &ActiveContext::All);
         cycle(&mut state, 1);
-        assert_eq!(state.active(), &ActiveContext::Default);
+        assert_eq!(state.active(), &ActiveContext::Named("kund".into()));
+        assert!(state.set_active(ActiveContext::Default));
+        assert!(state.tabs().contains(&ContextTab::Default));
+        // An untagged workspace keeps the tab around regardless of the selection.
+        state.observe_snapshot(
+            &ClientEndpointId::Local,
+            &snapshot("boot-1", vec![workspace("a", None)]),
+        );
+        assert!(state.set_active(ActiveContext::All));
+        assert!(state.default_has_members());
+        assert!(state.tabs().contains(&ContextTab::Default));
     }
 
     #[test]

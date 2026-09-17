@@ -1100,13 +1100,13 @@
           "key": "ui.sidebar.spaces.context_token",
           "type": "string",
           "default": "unset",
-          "description": "Workspace metadata token key (1-32 ASCII letters, digits, `_` or `-`) that groups Spaces into context tabs drawn in place of the spaces heading. Set the token with `herdr workspace report-metadata <workspace> --source <id> --token context=<name>`. Unset keeps the plain heading."
+          "description": "Workspace metadata token key (1-32 ASCII letters, digits, `_` or `-`) that groups Spaces into context tabs drawn as a bar across the top of the window. Set the token with `herdr workspace report-metadata <workspace> --source <id> --token context=<name>`. Unset keeps the plain heading."
         },
         {
           "key": "ui.sidebar.spaces.default_context",
           "type": "string",
           "default": "\"default\"",
-          "description": "Name of the built-in context tab that holds Spaces without the context token. It cannot be renamed or removed from the sidebar."
+          "description": "Name of the built-in context tab that holds Spaces without the context token. It cannot be renamed; the tab is only drawn while such a Space exists or while it is selected."
         },
         {
           "key": "ui.accent",

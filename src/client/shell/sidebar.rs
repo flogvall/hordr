@@ -199,28 +199,16 @@ pub(crate) fn render_sidebar(
         crate::ui::expanded_sidebar_sections(area, state.sidebar_section_split);
     hits.sidebar_section_divider =
         crate::ui::sidebar_section_divider_rect(area, state.sidebar_section_split);
-    // fork: context tabs
-    if state.contexts.enabled() {
-        contexts::render_tab_row(
-            buffer,
-            Rect::new(workspace_area.x, workspace_area.y, workspace_area.width, 1),
-            state.contexts,
-            palette,
-            config.mouse_capture,
-            &mut hits.context_tabs,
-        );
-    } else {
-        put_text(
-            buffer,
-            workspace_area.x,
-            workspace_area.y,
-            workspace_area.width,
-            " spaces",
-            Style::default()
-                .fg(palette.overlay0)
-                .add_modifier(Modifier::BOLD),
-        );
-    }
+    put_text(
+        buffer,
+        workspace_area.x,
+        workspace_area.y,
+        workspace_area.width,
+        " spaces",
+        Style::default()
+            .fg(palette.overlay0)
+            .add_modifier(Modifier::BOLD),
+    );
 
     // fork: context tabs
     let entries = workspace_entries(

@@ -259,6 +259,17 @@ pub(super) fn render_shell(
     mut state: ShellRenderState<'_>,
 ) -> ShellHitMap {
     let mut hits = ShellHitMap::default();
+    // fork: context tabs
+    if layout.context_bar.height > 0 {
+        contexts::render_tab_row(
+            buffer,
+            layout.context_bar,
+            state.contexts,
+            &config.palette,
+            config.mouse_capture,
+            &mut hits.context_tabs,
+        );
+    }
     if layout.mobile_header.height > 0 {
         super::mobile::render_mobile_header(
             buffer,
