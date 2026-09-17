@@ -339,16 +339,30 @@ impl ClientShellState {
         let endpoint_id = self.active_endpoint_id.clone();
         self.contexts
             .set_pending(&endpoint_id, &workspace_id, context.clone());
+        let method = crate::api::schema::Method::WorkspaceReportMetadata(
+            crate::api::schema::WorkspaceReportMetadataParams {
+                workspace_id: workspace_id.clone(),
+                source: contexts::CONTEXT_METADATA_SOURCE.to_owned(),
+                tokens: HashMap::from([(token_key, context)]),
+                seq: None,
+                ttl_ms: None,
+            },
+        );
+        outcome.repaint = true;
+        if self.context_reports_use_local_api() {
+            let request_id = self.next_request_id;
+            self.next_request_id = self.next_request_id.saturating_add(1);
+            outcome.actions.push(ClientShellAction::LocalApiRequest {
+                request: Box::new(crate::api::schema::Request {
+                    id: format!("client-shell-api:{request_id}"),
+                    method,
+                }),
+                workspace_id,
+            });
+            return true;
+        }
         let sent = self.push_endpoint_method_with_kind(
-            crate::api::schema::Method::WorkspaceReportMetadata(
-                crate::api::schema::WorkspaceReportMetadataParams {
-                    workspace_id: workspace_id.clone(),
-                    source: contexts::CONTEXT_METADATA_SOURCE.to_owned(),
-                    tokens: HashMap::from([(token_key, context)]),
-                    seq: None,
-                    ttl_ms: None,
-                },
-            ),
+            method,
             PendingEndpointKind::ContextReport {
                 workspace_id: workspace_id.clone(),
             },
@@ -357,8 +371,35 @@ impl ClientShellState {
         if !sent {
             self.contexts.clear_pending(&endpoint_id, &workspace_id);
         }
-        outcome.repaint = true;
         sent
+    }
+
+    // fork: context tabs
+    /// A local client reaches its own server's public API socket directly; `--remote`
+    /// and saved machines only have the private client lane.
+    fn context_reports_use_local_api(&self) -> bool {
+        self.active_endpoint_id.is_local() && !crate::client::handshake::is_remote_client_process()
+    }
+
+    // fork: context tabs
+    /// Completion of a `LocalApiRequest`; a failure drops the optimistic override.
+    pub(crate) fn finish_local_api_request(
+        &mut self,
+        workspace_id: &str,
+        result: Result<(), String>,
+    ) -> bool {
+        let Err(message) = result else {
+            return false;
+        };
+        let endpoint_id = self.active_endpoint_id.clone();
+        self.contexts.clear_pending(&endpoint_id, workspace_id);
+        self.push_endpoint_notice(
+            ClientEndpointNoticeKind::Rejected,
+            "workspace.report_metadata:local_api",
+            "Action rejected",
+            message,
+        );
+        true
     }
 
     // fork: context tabs
@@ -372,6 +413,13 @@ impl ClientShellState {
         let reports = self.contexts.take_queued_reports(&endpoint_id);
         if reports.is_empty() {
             return None;
+        }
+        if self.context_reports_use_local_api() {
+            let mut outcome = ClientShellInput::default();
+            for report in reports {
+                self.push_context_report(report.workspace_id, report.context, &mut outcome);
+            }
+            return Some(outcome);
         }
         let probe = crate::api::schema::Method::WorkspaceReportMetadata(
             crate::api::schema::WorkspaceReportMetadataParams {

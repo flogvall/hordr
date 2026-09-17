@@ -436,19 +436,25 @@ fn tab_rect(state: &ClientShellState, tab: &contexts::ContextTab) -> Rect {
         .expect("tab hit")
 }
 
+/// Context reports go to the local API socket for the local server and through the
+/// endpoint lane otherwise; both carry the same `workspace.report_metadata` request.
 fn report_targets(outcome: &ClientShellInput) -> Vec<(String, Option<String>)> {
     outcome
         .actions
         .iter()
-        .filter_map(|action| match action {
-            ClientShellAction::Endpoint { request, .. } => match &request.method {
+        .filter_map(|action| {
+            let request = match action {
+                ClientShellAction::Endpoint { request, .. } => request,
+                ClientShellAction::LocalApiRequest { request, .. } => request,
+                _ => return None,
+            };
+            match &request.method {
                 crate::api::schema::Method::WorkspaceReportMetadata(params) => Some((
                     params.workspace_id.clone(),
                     params.tokens.get("context").cloned().flatten(),
                 )),
                 _ => None,
-            },
-            _ => None,
+            }
         })
         .collect()
 }
@@ -637,15 +643,33 @@ fn new_workspace_under_a_named_tab_reports_the_context() {
 
     let (_, actions) =
         state.handle_endpoint_result("boot-1", &request.id, Ok(created_workspace("ws_9")));
-    let [ClientShellAction::Endpoint { request, .. }] = &actions[..] else {
+    // The local server takes the report on its public API socket, not the client lane.
+    let [ClientShellAction::LocalApiRequest {
+        request,
+        workspace_id,
+    }] = &actions[..]
+    else {
         panic!("context report follows the create reply");
     };
+    assert_eq!(workspace_id, "ws_9");
     let crate::api::schema::Method::WorkspaceReportMetadata(params) = &request.method else {
         panic!("expected report_metadata");
     };
     assert_eq!(params.workspace_id, "ws_9");
     assert_eq!(params.source, contexts::CONTEXT_METADATA_SOURCE);
     assert_eq!(params.tokens.get("context"), Some(&Some("kund".to_owned())));
+    // A failed report drops the optimistic override and tells the user.
+    let mut probe = contextual_state(Some("context"));
+    let mut outcome = ClientShellInput::default();
+    probe.push_context_report("ws_1".into(), Some("kund".into()), &mut outcome);
+    assert_eq!(
+        report_targets(&outcome),
+        [("ws_1".to_owned(), Some("kund".to_owned()))]
+    );
+    assert!(probe.finish_local_api_request("ws_1", Err("boom".into())));
+    assert!(probe.visible_endpoint_notice.is_some());
+    probe.compose(106, 30).expect("composed frame");
+    assert_eq!(visible_workspaces(&probe), ["ws_1"]);
 
     // The next snapshot still lacks the token; the optimistic override keeps ws_9 visible.
     let mut projected = contextual_snapshot();

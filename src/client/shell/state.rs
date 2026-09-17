@@ -253,6 +253,14 @@ pub(crate) enum ClientShellAction {
     },
     ReplayMouse(Vec<crossterm::event::MouseEvent>),
     Keybind(crate::input::KeybindAction),
+    // fork: context tabs
+    /// A request for the local server's public JSON API socket. The private client
+    /// lane only carries an allowlist of methods, and `workspace.report_metadata` is
+    /// not on it, so a local client reports context tokens the way the CLI does.
+    LocalApiRequest {
+        request: Box<crate::api::schema::Request>,
+        workspace_id: String,
+    },
 }
 
 #[derive(Default)]

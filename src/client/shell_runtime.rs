@@ -54,6 +54,20 @@ pub(super) fn dispatch_client_shell_actions(
                     "client shell action awaits its presentation family"
                 );
             }
+            // fork: context tabs
+            shell::ClientShellAction::LocalApiRequest {
+                request,
+                workspace_id,
+            } => {
+                let result = crate::api::client::ApiClient::local()
+                    .request_value_with_timeout(&request, std::time::Duration::from_secs(5))
+                    .and_then(crate::api::client::parse_response_value)
+                    .map(|_| ())
+                    .map_err(|error| error.to_string());
+                if let Some(shell) = shell.as_deref_mut() {
+                    repaint |= shell.finish_local_api_request(&workspace_id, result);
+                }
+            }
         }
     }
     // A source-off-first handoff leaves the registry's committed identity pointing at a
