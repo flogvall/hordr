@@ -567,6 +567,61 @@ fn switching_context_focuses_the_most_recent_workspace() {
 }
 
 #[test]
+fn empty_context_shows_no_workspace_and_swallows_pane_input() {
+    let mut state = contextual_state(Some("context"));
+    state.contexts.add_known("ops");
+    // A populated tab shows the live pane and forwards typed text to it.
+    state
+        .contexts
+        .set_active(contexts::ActiveContext::Named("kund".into()));
+    let frame = state.compose(106, 30).expect("composed frame");
+    let rows = frame_rows(&frame);
+    assert!(rows.iter().any(|row| row.contains("LIVE")), "{rows:?}");
+    assert!(!state.hits.panes.is_empty());
+    assert!(!state.hits.tabs.is_empty());
+    let typed = state.handle_input_bytes(b"x");
+    assert!(!typed.requests.is_empty() || !typed.actions.is_empty());
+
+    // An empty tab hides it: placeholder instead of panes, no tabs, no input target.
+    state
+        .contexts
+        .set_active(contexts::ActiveContext::Named("ops".into()));
+    assert!(state.active_context_is_empty());
+    let frame = state.compose(106, 30).expect("composed frame");
+    let rows = frame_rows(&frame);
+    assert!(!rows.iter().any(|row| row.contains("LIVE")), "{rows:?}");
+    assert!(
+        rows.iter().any(|row| row.contains("no spaces in ops")),
+        "{rows:?}"
+    );
+    assert!(
+        rows.iter()
+            .any(|row| row.contains("ctrl+b shift+n creates one here")),
+        "{rows:?}"
+    );
+    assert!(frame.cursor.is_none());
+    assert!(state.hits.panes.is_empty());
+    assert!(state.hits.tabs.is_empty());
+    assert!(state.focused_pane_id().is_none());
+    let typed = state.handle_input_bytes(b"x");
+    assert!(typed.requests.is_empty(), "{:?}", typed.requests);
+    assert!(typed.actions.is_empty(), "{:?}", typed.actions);
+    // Shell keys still work: creating a workspace lands in the empty context.
+    state.handle_input_bytes(&[0x02]);
+    let created = state.handle_input_bytes(b"N");
+    let [ClientShellAction::Endpoint { request, .. }] = &created.actions[..] else {
+        panic!("workspace create request");
+    };
+    assert!(matches!(
+        state.pending_requests[&request.id].kind,
+        PendingEndpointKind::WorkspaceCreateInContext { ref context } if context == "ops"
+    ));
+    // `all` is never empty.
+    state.contexts.set_active(contexts::ActiveContext::All);
+    assert!(!state.active_context_is_empty());
+}
+
+#[test]
 fn plus_tab_prompts_for_a_new_context_and_activates_it() {
     let mut state = contextual_state(Some("context"));
     state.compose(106, 30).expect("composed frame");
