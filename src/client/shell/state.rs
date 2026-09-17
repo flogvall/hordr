@@ -1543,6 +1543,13 @@ impl ClientShellState {
                 }
             }
         }
+        // fork: context tabs
+        if self
+            .contexts
+            .note_focus(&self.active_endpoint_id, &snapshot)
+        {
+            self.persist_chrome_preferences(&mut ClientShellInput::default());
+        }
         if self.mode == ClientShellMode::Navigate && self.navigate_workspace_id.is_none() {
             self.navigate_workspace_id = snapshot
                 .focused_workspace_id

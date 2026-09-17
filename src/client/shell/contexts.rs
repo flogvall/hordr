@@ -10,7 +10,7 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 use super::preferences::{
-    ClientContextPreferences, ClientContextSelection, ClientWorkspaceContext,
+    ClientContextPreferences, ClientContextRecent, ClientContextSelection, ClientWorkspaceContext,
 };
 use super::ClientEndpointId;
 use crate::protocol::{ClientShellSnapshot, ClientShellWorkspace};
@@ -26,7 +26,7 @@ const MAX_CONTEXT_NAME_LEN: usize = 80;
 /// Widest label kept for inactive tabs when the row does not fit.
 const COMPACT_TAB_WIDTH: usize = 5;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(super) enum ActiveContext {
     Default,
     Named(String),
@@ -38,6 +38,24 @@ impl ActiveContext {
         match self {
             Self::Named(name) => Some(name),
             Self::Default | Self::All => None,
+        }
+    }
+
+    fn to_selection(&self) -> ClientContextSelection {
+        match self {
+            Self::Default => ClientContextSelection::Default,
+            Self::All => ClientContextSelection::All,
+            Self::Named(name) => ClientContextSelection::Named { name: name.clone() },
+        }
+    }
+
+    fn from_selection(selection: &ClientContextSelection) -> Option<Self> {
+        match selection {
+            ClientContextSelection::Default => Some(Self::Default),
+            ClientContextSelection::All => Some(Self::All),
+            ClientContextSelection::Named { name } => {
+                ContextState::normalize_name(name).map(Self::Named)
+            }
         }
     }
 }
@@ -139,6 +157,9 @@ pub(super) struct ContextState {
     /// Workspaces without the token per endpoint storage key, from the last snapshot.
     /// The default tab is only drawn while one of them exists (or while it is active).
     untagged: HashMap<String, Vec<String>>,
+    /// Most recently focused (endpoint storage key, workspace id) per default/named
+    /// context, so switching tabs lands where the user last worked.
+    recent: HashMap<ActiveContext, (String, String)>,
 }
 
 impl ContextState {
@@ -156,12 +177,23 @@ impl ContextState {
             assignments: HashMap::new(),
             queued_reports: Vec::new(),
             untagged: HashMap::new(),
+            recent: HashMap::new(),
         };
         let Some(saved) = saved else {
             return state;
         };
         for name in &saved.known {
             state.add_known(name);
+        }
+        for entry in &saved.recent {
+            if let Some(context) = ActiveContext::from_selection(&entry.context)
+                .filter(|context| *context != ActiveContext::All)
+            {
+                state.recent.insert(
+                    context,
+                    (entry.endpoint.clone(), entry.workspace_id.clone()),
+                );
+            }
         }
         for entry in &saved.workspaces {
             if let Some(context) = Self::normalize_name(&entry.context) {
@@ -266,7 +298,47 @@ impl ContextState {
 
     /// Drops what was learned from an endpoint that left the catalog.
     pub(super) fn forget_endpoint(&mut self, endpoint_id: &ClientEndpointId) {
-        self.untagged.remove(&endpoint_id.storage_key());
+        let endpoint = endpoint_id.storage_key();
+        self.untagged.remove(&endpoint);
+        self.recent
+            .retain(|_, (recent_endpoint, _)| recent_endpoint != &endpoint);
+    }
+
+    /// Remembers the focused workspace under its context. Returns whether anything
+    /// changed (the caller persists then).
+    pub(super) fn note_focus(
+        &mut self,
+        endpoint_id: &ClientEndpointId,
+        snapshot: &ClientShellSnapshot,
+    ) -> bool {
+        if !self.enabled() {
+            return false;
+        }
+        let Some(workspace) = snapshot.focused_workspace_id.as_deref().and_then(|id| {
+            snapshot
+                .workspaces
+                .iter()
+                .find(|workspace| workspace.workspace_id == id)
+        }) else {
+            return false;
+        };
+        let context = match self.workspace_context(endpoint_id, workspace) {
+            Some(name) => ActiveContext::Named(name.to_owned()),
+            None => ActiveContext::Default,
+        };
+        let entry = (endpoint_id.storage_key(), workspace.workspace_id.clone());
+        if self.recent.get(&context) == Some(&entry) {
+            return false;
+        }
+        self.recent.insert(context, entry);
+        true
+    }
+
+    /// The (endpoint storage key, workspace id) last focused under `context`, if any.
+    pub(super) fn recent_workspace(&self, context: &ActiveContext) -> Option<(&str, &str)> {
+        self.recent
+            .get(context)
+            .map(|(endpoint, workspace_id)| (endpoint.as_str(), workspace_id.as_str()))
     }
 
     /// Selectable targets in tab order (everything except `+`), used by next/previous.
@@ -324,6 +396,7 @@ impl ContextState {
         }
         self.assignments
             .retain(|_, assignment| assignment.context != name);
+        self.recent.remove(&ActiveContext::Named(name.to_owned()));
         removed
     }
 
@@ -347,6 +420,9 @@ impl ContextState {
             if assignment.context == old {
                 assignment.context = new.clone();
             }
+        }
+        if let Some(entry) = self.recent.remove(&ActiveContext::Named(old.to_owned())) {
+            self.recent.insert(ActiveContext::Named(new), entry);
         }
         true
     }
@@ -567,10 +643,23 @@ impl ContextState {
         workspaces.sort_by(|left, right| {
             (&left.endpoint, &left.workspace_id).cmp(&(&right.endpoint, &right.workspace_id))
         });
+        let mut recent = self
+            .recent
+            .iter()
+            .map(|(context, (endpoint, workspace_id))| ClientContextRecent {
+                context: context.to_selection(),
+                endpoint: endpoint.clone(),
+                workspace_id: workspace_id.clone(),
+            })
+            .collect::<Vec<_>>();
+        recent.sort_by(|left, right| {
+            format!("{:?}", left.context).cmp(&format!("{:?}", right.context))
+        });
         let preferences = ClientContextPreferences {
             active,
             known: self.known.iter().cloned().collect(),
             workspaces,
+            recent,
         };
         (preferences != ClientContextPreferences::default()).then_some(preferences)
     }
@@ -718,12 +807,63 @@ impl super::ClientShellState {
             self.agent_scroll = 0;
             self.reveal_focused_workspace = true;
             self.persist_chrome_preferences(outcome);
+            self.focus_recent_in_context(outcome);
         }
         if self.mode == super::ClientShellMode::Navigate {
             self.navigate_workspace_id = self.visible_navigation_target();
             self.reveal_navigation_workspace = true;
         }
         outcome.repaint = true;
+    }
+
+    /// After a tab switch, focus the workspace last used under that context (or the
+    /// first visible one) unless the focused workspace already belongs to it.
+    fn focus_recent_in_context(&mut self, outcome: &mut super::ClientShellInput) {
+        let Some(snapshot) = self.snapshot.as_deref() else {
+            return;
+        };
+        let endpoint_id = self.active_endpoint_id.clone();
+        let Some(view) = self.contexts.view(&endpoint_id) else {
+            return;
+        };
+        if snapshot
+            .focused_workspace_id
+            .as_deref()
+            .is_some_and(|id| view.workspace_id_visible(snapshot, id))
+        {
+            return;
+        }
+        let recent = self
+            .contexts
+            .recent_workspace(self.contexts.active())
+            .and_then(|(endpoint_key, workspace_id)| {
+                let endpoint = self
+                    .endpoints
+                    .iter()
+                    .find(|endpoint| endpoint.endpoint_id.storage_key() == endpoint_key)?;
+                let snapshot = endpoint.snapshot.as_deref()?;
+                self.contexts
+                    .view(&endpoint.endpoint_id)?
+                    .workspace_id_visible(snapshot, workspace_id)
+                    .then(|| (endpoint.endpoint_id.clone(), workspace_id.to_owned()))
+            });
+        let target = recent.or_else(|| {
+            self.navigation_workspace_entries(snapshot)
+                .first()
+                .map(|entry| {
+                    (
+                        endpoint_id.clone(),
+                        snapshot.workspaces[entry.index].workspace_id.clone(),
+                    )
+                })
+        });
+        if let Some((endpoint_id, workspace_id)) = target {
+            self.focus_or_activate(
+                endpoint_id,
+                super::ClientEndpointFocusTarget::Workspace(workspace_id),
+                outcome,
+            );
+        }
     }
 
     pub(super) fn cycle_context(&mut self, delta: isize, outcome: &mut super::ClientShellInput) {
@@ -1229,6 +1369,20 @@ mod tests {
         );
         state.add_known("privat");
         state.set_active(ActiveContext::Named("privat".into()));
+        let mut focused = snapshot("boot-1", vec![workspace("a", Some("kund"))]);
+        focused.focused_workspace_id = Some("a".into());
+        assert!(state.note_focus(&local, &focused));
+        assert!(!state.note_focus(&local, &focused));
+        assert_eq!(
+            state.recent_workspace(&ActiveContext::Named("kund".into())),
+            Some(("local", "a"))
+        );
+        assert!(state.rename_known("kund", "kunder"));
+        assert_eq!(
+            state.recent_workspace(&ActiveContext::Named("kunder".into())),
+            Some(("local", "a"))
+        );
+        assert!(state.rename_known("kunder", "kund"));
         let saved = state.to_preferences().expect("non-empty preferences");
         let json = serde_json::to_string(&saved).expect("encode");
         let decoded: ClientContextPreferences = serde_json::from_str(&json).expect("decode");
@@ -1237,6 +1391,10 @@ mod tests {
         assert_eq!(restored.active(), &ActiveContext::Named("privat".into()));
         assert_eq!(restored.known().collect::<Vec<_>>(), ["kund", "privat"]);
         assert_eq!(restored.assignments, state.assignments);
+        assert_eq!(
+            restored.recent_workspace(&ActiveContext::Named("kund".into())),
+            Some(("local", "a"))
+        );
         assert_eq!(restored.to_preferences(), Some(saved));
         // Legacy files without the section still load.
         let legacy: super::super::preferences::ClientChromePreferences =

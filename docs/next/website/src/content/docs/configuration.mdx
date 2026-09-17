@@ -482,7 +482,7 @@ previous_context = "prefix+ä"
 move_workspace_to_context = "prefix+shift+m"
 ```
 
-Click a tab to activate it, click `+` to create a context, or right-click a tab to rename or remove it; removing a context clears the token on its Spaces. Right-click a Space and choose "Move to context..." to move it, or "New context..." to create a context and move the Space in one step. A Space created while a named tab is active gets that context. Scripts and plugins can set the same token:
+Click a tab to activate it, click `+` to create a context, or right-click a tab to rename or remove it; removing a context clears the token on its Spaces. Switching to a tab focuses the Space you last used under that context (or its first Space) unless the focused Space already belongs to it. Right-click a Space and choose "Move to context..." to move it, or "New context..." to create a context and move the Space in one step. A Space created while a named tab is active gets that context. Scripts and plugins can set the same token:
 
 ```bash
 herdr workspace report-metadata <workspace_id> --source my-hook --token context=client

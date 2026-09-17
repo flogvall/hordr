@@ -34,6 +34,15 @@ pub(super) struct ClientWorkspaceContext {
 }
 
 // fork: context tabs
+/// The workspace that was focused most recently while a context was active.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub(super) struct ClientContextRecent {
+    pub(super) context: ClientContextSelection,
+    pub(super) endpoint: String,
+    pub(super) workspace_id: String,
+}
+
+// fork: context tabs
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub(super) struct ClientContextPreferences {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -42,6 +51,8 @@ pub(super) struct ClientContextPreferences {
     pub(super) known: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(super) workspaces: Vec<ClientWorkspaceContext>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) recent: Vec<ClientContextRecent>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -169,6 +180,11 @@ mod tests {
                     boot_id: "boot-1".into(),
                     workspace_id: "ws_1".into(),
                     context: "kund".into(),
+                }],
+                recent: vec![ClientContextRecent {
+                    context: ClientContextSelection::Default,
+                    endpoint: "local".into(),
+                    workspace_id: "ws_2".into(),
                 }],
             }),
             ..ClientChromePreferences::default()
