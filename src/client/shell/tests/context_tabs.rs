@@ -252,9 +252,16 @@ fn machines_sidebar_filters_every_endpoint() {
 }
 
 /// The sidebar heading row without the trailing divider column.
+/// The full-width top row (the context bar when enabled).
 fn heading_row(state: &mut ClientShellState, cols: u16) -> String {
     let frame = state.compose(cols, 30).expect("composed frame");
-    frame_rows(&frame)[0]
+    frame_rows(&frame)[0].trim_end().to_owned()
+}
+
+/// The sidebar heading without the trailing divider column.
+fn sidebar_heading(state: &mut ClientShellState, cols: u16, row: usize) -> String {
+    let frame = state.compose(cols, 30).expect("composed frame");
+    frame_rows(&frame)[row]
         .chars()
         .take(usize::from(state.sidebar_width.saturating_sub(1)))
         .collect::<String>()
@@ -272,13 +279,25 @@ fn tab_hits(state: &ClientShellState) -> Vec<contexts::ContextTab> {
 }
 
 #[test]
-fn tab_row_replaces_the_spaces_heading_and_registers_hits() {
+fn context_bar_sits_above_the_sidebar_and_registers_hits() {
     let mut state = contextual_state(None);
-    assert_eq!(heading_row(&mut state, 106), " spaces");
+    assert_eq!(sidebar_heading(&mut state, 106, 0), " spaces");
     assert!(state.hits.context_tabs.is_empty());
+    assert_eq!(state.surface_size(106, 30).rows, 29);
 
     let mut state = contextual_state(Some("context"));
     assert_eq!(heading_row(&mut state, 106), " + default kund privat all");
+    assert_eq!(sidebar_heading(&mut state, 106, 1), " spaces");
+    // The bar costs one row of pane surface, agreed on before the handshake too.
+    assert_eq!(state.surface_size(106, 30).rows, 28);
+    let mut config = Config::default();
+    config.ui.sidebar.spaces.context_token = Some("context".into());
+    assert_eq!(
+        ClientShellConfig::from_config(&config)
+            .initial_surface_size(106, 30)
+            .rows,
+        state.surface_size(106, 30).rows
+    );
     assert_eq!(
         tab_hits(&state),
         [
@@ -310,18 +329,24 @@ fn tab_row_replaces_the_spaces_heading_and_registers_hits() {
 }
 
 #[test]
-fn narrow_sidebar_truncates_but_keeps_the_active_tab() {
+fn narrow_terminal_truncates_but_keeps_the_active_tab() {
     let mut state = contextual_state(Some("context"));
-    for name in ["arkitekturprojektet", "kundleveransen"] {
+    state.config.mobile_width_threshold = 10;
+    for name in [
+        "arkitekturprojektet",
+        "kundleveransen",
+        "plattformsteamet",
+        "sommarprojektet",
+    ] {
         state.contexts.add_known(name);
     }
     state
         .contexts
         .set_active(contexts::ActiveContext::Named("kundleveransen".into()));
-    state.sidebar_width = 18;
-    let row = heading_row(&mut state, 106);
+    let row = heading_row(&mut state, 40);
     assert!(row.contains("kundleveransen"), "{row:?}");
-    assert!(row.chars().count() <= 17, "{row:?}");
+    assert!(row.chars().count() <= 40, "{row:?}");
+    assert!(row.contains('…'), "{row:?}");
     let active = state
         .hits
         .context_tabs
@@ -329,16 +354,16 @@ fn narrow_sidebar_truncates_but_keeps_the_active_tab() {
         .find(|(_, tab)| tab == &contexts::ContextTab::Named("kundleveransen".into()))
         .map(|(rect, _)| *rect)
         .expect("active tab hit");
-    assert!(active.right() <= 18);
+    assert!(active.right() <= 40);
     assert!(state
         .hits
         .context_tabs
         .iter()
-        .all(|(rect, _)| rect.right() <= 18));
+        .all(|(rect, _)| rect.right() <= 40 && rect.y == 0));
 }
 
 #[test]
-fn machines_sidebar_draws_the_tab_row_too() {
+fn machines_sidebar_keeps_the_context_bar() {
     let mut state = contextual_state(Some("context"));
     let profile =
         crate::client::endpoint::SavedSshEndpoint::new("Build", "dev@build.example", "agents")
@@ -350,7 +375,46 @@ fn machines_sidebar_draws_the_tab_row_too() {
     projected.boot_id = "remote-boot".into();
     state.set_endpoint_snapshot(&remote, Box::new(projected));
     assert_eq!(heading_row(&mut state, 106), " + default kund privat all");
+    assert_eq!(sidebar_heading(&mut state, 106, 1), " machines");
     assert_eq!(state.hits.context_tabs.len(), 5);
+}
+
+#[test]
+fn default_tab_only_shows_while_it_holds_something_or_is_selected() {
+    let mut state = contextual_state(Some("context"));
+    let mut projected = contextual_snapshot();
+    projected.workspaces[0].tokens = vec![("context".to_owned(), "privat".to_owned())];
+    state.set_snapshot(Box::new(projected.clone()));
+    // Selected but empty: still drawn so the user is never stranded.
+    assert_eq!(heading_row(&mut state, 106), " + default kund privat all");
+    state
+        .contexts
+        .set_active(contexts::ActiveContext::Named("kund".into()));
+    assert_eq!(heading_row(&mut state, 106), " + kund privat all");
+    assert!(!tab_hits(&state).contains(&contexts::ContextTab::Default));
+
+    // A move back to default (still in flight) brings the tab back at once...
+    let row = workspace_row(&state, "ws_2");
+    right_click(&mut state, row.x + 2, row.y);
+    activate_menu_label(&mut state, "Move to context...");
+    activate_menu_label(&mut state, "default");
+    assert_eq!(heading_row(&mut state, 106), " + default kund privat all");
+    // ...and the confirming snapshot keeps it.
+    projected.workspaces[1].tokens.clear();
+    state.set_snapshot(Box::new(projected.clone()));
+    assert_eq!(heading_row(&mut state, 106), " + default kund privat all");
+
+    // Once the server tags it again the tab goes away, and next/previous skip it.
+    projected.workspaces[1].tokens = vec![("context".to_owned(), "kund".to_owned())];
+    state.set_snapshot(Box::new(projected));
+    assert_eq!(heading_row(&mut state, 106), " + kund privat all");
+    state.cycle_context(-1, &mut ClientShellInput::default());
+    assert_eq!(state.contexts.active(), &contexts::ActiveContext::All);
+    state.cycle_context(1, &mut ClientShellInput::default());
+    assert_eq!(
+        state.contexts.active(),
+        &contexts::ActiveContext::Named("kund".into())
+    );
 }
 
 fn click(state: &mut ClientShellState, column: u16, row: u16) -> ClientShellInput {
