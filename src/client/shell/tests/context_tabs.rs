@@ -480,7 +480,8 @@ fn clicking_a_tab_switches_the_context_and_persists_it() {
     let kund = tab_rect(&state, &contexts::ContextTab::Named("kund".into()));
     let outcome = click(&mut state, kund.x, kund.y);
     assert!(outcome.repaint);
-    assert!(outcome.actions.is_empty());
+    // No memory for kund yet, so its first workspace gets focus.
+    assert_eq!(focus_target(&outcome).as_deref(), Some("ws_2"));
     state.compose(106, 30).expect("composed frame");
     assert_eq!(visible_workspaces(&state), ["ws_2", "ws_4"]);
 
@@ -494,6 +495,73 @@ fn clicking_a_tab_switches_the_context_and_persists_it() {
     assert_eq!(
         reloaded.contexts.known().collect::<Vec<_>>(),
         ["kund", "privat"]
+    );
+    std::fs::remove_file(path).expect("remove preferences");
+}
+
+#[test]
+fn switching_context_focuses_the_most_recent_workspace() {
+    let path = std::env::temp_dir().join(format!(
+        "herdr-context-tabs-recent-{}.json",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_file(&path);
+    let mut config = Config::default();
+    config.ui.sidebar.spaces.context_token = Some("context".into());
+    let mut state = ClientShellState::new(
+        ClientShellConfig::from_config(&config).with_preferences_path(path.clone()),
+    );
+    state.sidebar_width = 32;
+    state.sidebar_width_manual = true;
+    state.set_pane_surface(surface());
+    // ws_4 (kund) was focused most recently, then the user went back to ws_1 (default).
+    let mut focused_kund = contextual_snapshot();
+    focused_kund.workspaces[0].focused = false;
+    focused_kund.workspaces[3].focused = true;
+    focused_kund.focused_workspace_id = Some("ws_4".into());
+    state.set_snapshot(Box::new(focused_kund));
+    state.set_snapshot(Box::new(contextual_snapshot()));
+    state.compose(106, 30).expect("composed frame");
+
+    let kund = tab_rect(&state, &contexts::ContextTab::Named("kund".into()));
+    let outcome = click(&mut state, kund.x, kund.y);
+    assert_eq!(focus_target(&outcome).as_deref(), Some("ws_4"));
+    // Without a memory the first visible workspace is focused; `all` needs nothing.
+    let privat = tab_rect(&state, &contexts::ContextTab::Named("privat".into()));
+    let outcome = click(&mut state, privat.x, privat.y);
+    assert_eq!(focus_target(&outcome).as_deref(), Some("ws_3"));
+    let all = tab_rect(&state, &contexts::ContextTab::All);
+    let outcome = click(&mut state, all.x, all.y);
+    assert!(outcome.actions.is_empty());
+    // Back to a context the focused workspace already belongs to: nothing to do.
+    state
+        .contexts
+        .set_active(contexts::ActiveContext::Named("kund".into()));
+    let mut on_ws_4 = contextual_snapshot();
+    on_ws_4.workspaces[0].focused = false;
+    on_ws_4.workspaces[3].focused = true;
+    on_ws_4.focused_workspace_id = Some("ws_4".into());
+    state.set_snapshot(Box::new(on_ws_4));
+    let mut outcome = ClientShellInput::default();
+    state.activate_context(contexts::ActiveContext::All, &mut outcome);
+    state.activate_context(contexts::ActiveContext::Named("kund".into()), &mut outcome);
+    assert!(outcome.actions.is_empty());
+
+    // The memory survives a restart of the client.
+    let reloaded = ClientShellState::new(
+        ClientShellConfig::from_config(&config).with_preferences_path(path.clone()),
+    );
+    assert_eq!(
+        reloaded
+            .contexts
+            .recent_workspace(&contexts::ActiveContext::Named("kund".into())),
+        Some(("local", "ws_4"))
+    );
+    assert_eq!(
+        reloaded
+            .contexts
+            .recent_workspace(&contexts::ActiveContext::Default),
+        Some(("local", "ws_1"))
     );
     std::fs::remove_file(path).expect("remove preferences");
 }
