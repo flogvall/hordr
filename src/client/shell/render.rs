@@ -249,6 +249,8 @@ pub(super) struct ShellRenderState<'a> {
     pub(super) workspace_drop_indicator_row: Option<u16>,
     // fork: context tabs
     pub(super) contexts: &'a contexts::ContextState,
+    // fork: context tabs — the active context holds no workspace on this endpoint
+    pub(super) context_empty: bool,
 }
 
 pub(super) fn render_shell(
@@ -321,7 +323,10 @@ pub(super) fn render_shell(
             );
         }
     }
-    if layout.tab_bar.height > 0 {
+    // fork: context tabs — no tabs to show for a hidden workspace
+    if state.context_empty {
+        buffer.set_style(layout.tab_bar, Style::default().bg(config.palette.panel_bg));
+    } else if layout.tab_bar.height > 0 {
         render_tab_bar(
             buffer,
             layout.tab_bar,

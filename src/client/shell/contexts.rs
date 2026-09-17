@@ -816,6 +816,71 @@ impl super::ClientShellState {
         outcome.repaint = true;
     }
 
+    /// A default or named tab with no workspace on the active endpoint: the client shows
+    /// an empty pane area instead of whatever the server still has focused.
+    pub(super) fn active_context_is_empty(&self) -> bool {
+        if !self.contexts.enabled() || self.contexts.active() == &ActiveContext::All {
+            return false;
+        }
+        self.snapshot
+            .as_deref()
+            .is_some_and(|snapshot| self.navigation_workspace_entries(snapshot).is_empty())
+    }
+
+    /// Placeholder drawn over the pane area while the active context is empty.
+    pub(super) fn render_empty_context(
+        &self,
+        buffer: &mut ratatui::buffer::Buffer,
+        area: ratatui::layout::Rect,
+    ) {
+        use ratatui::style::{Modifier, Style};
+
+        let palette = &self.config.palette;
+        buffer.set_style(area, Style::default().bg(palette.panel_bg));
+        if area.height < 2 || area.width < 4 {
+            return;
+        }
+        let name = match self.contexts.active() {
+            ActiveContext::Named(name) => name.as_str(),
+            _ => self.contexts.default_name(),
+        };
+        let title = format!("no spaces in {name}");
+        let binding = self
+            .config
+            .keybinds
+            .keybinds
+            .new_workspace
+            .prefix_rhs_label()
+            .map(|rhs| {
+                format!(
+                    "{} {rhs}",
+                    crate::config::format_key_combo(self.config.keybinds.prefix)
+                )
+            })
+            .unwrap_or_else(|| "new".to_owned());
+        let hint = format!("{binding} creates one here · right-click a space to move it");
+        let middle = area.y.saturating_add(area.height / 2).saturating_sub(1);
+        for (row, text, style) in [
+            (
+                middle,
+                title,
+                Style::default()
+                    .fg(palette.overlay1)
+                    .bg(palette.panel_bg)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            (
+                middle.saturating_add(1),
+                hint,
+                Style::default().fg(palette.overlay0).bg(palette.panel_bg),
+            ),
+        ] {
+            let width = super::render::display_width(&text).min(area.width);
+            let x = area.x.saturating_add(area.width.saturating_sub(width) / 2);
+            super::render::put_text(buffer, x, row, width, &text, style);
+        }
+    }
+
     /// After a tab switch, focus the workspace last used under that context (or the
     /// first visible one) unless the focused workspace already belongs to it.
     fn focus_recent_in_context(&mut self, outcome: &mut super::ClientShellInput) {

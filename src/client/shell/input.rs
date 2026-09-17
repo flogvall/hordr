@@ -967,6 +967,10 @@ impl ClientShellState {
     }
 
     pub(super) fn focused_pane_id(&self) -> Option<String> {
+        // fork: context tabs — an empty context shows no pane, so nothing takes input
+        if self.active_context_is_empty() {
+            return None;
+        }
         self.snapshot
             .as_deref()
             .and_then(|snapshot| snapshot.focused_pane_id.clone())

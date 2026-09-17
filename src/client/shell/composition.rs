@@ -71,6 +71,7 @@ impl ClientShellState {
             workspace_drop_indicator_row: None,
             // fork: context tabs
             contexts: &self.contexts,
+            context_empty: false,
         };
         if let Some(snapshot) = local_snapshot {
             render::render_sidebar(
@@ -190,6 +191,8 @@ impl ClientShellState {
             ),
             _ => (None, None),
         };
+        // fork: context tabs
+        let context_empty = self.active_context_is_empty();
         let mut buffer = Buffer::empty(Rect::new(0, 0, cols, rows));
         self.hits = render::render_shell(
             &mut buffer,
@@ -219,8 +222,13 @@ impl ClientShellState {
                 workspace_drop_indicator_row,
                 // fork: context tabs
                 contexts: &self.contexts,
+                context_empty,
             },
         );
+        // fork: context tabs
+        if context_empty {
+            self.render_empty_context(&mut buffer, layout.pane_surface);
+        }
         self.hits.panes = surface
             .panes
             .iter()
@@ -329,7 +337,10 @@ impl ClientShellState {
             let start = usize::from(bar.y) * usize::from(frame.width) + usize::from(bar.x);
             frame.cells[start..start + usize::from(bar.width)].to_vec()
         });
-        blit_pane_surface(&mut frame, &surface.frame, layout.pane_surface);
+        // fork: context tabs — the hidden workspace's panes stay off screen
+        if !context_empty {
+            blit_pane_surface(&mut frame, &surface.frame, layout.pane_surface);
+        }
         restore_mode_bar(&mut frame, mode_bar, mode_bar_cells.as_deref());
         let mut occlusion = crate::kitty_graphics::surface::Occlusion::default();
         let has_selection = self
@@ -703,6 +714,14 @@ impl ClientShellState {
             self.hits.panes.clear();
             self.hits.pane_splits.clear();
             self.hits.popup = None;
+        }
+        // fork: context tabs
+        if context_empty {
+            frame.cursor = None;
+            self.hits.panes.clear();
+            self.hits.pane_splits.clear();
+            self.hits.popup = None;
+            return Some(frame);
         }
         self.compose_graphics(&mut frame, layout, &occlusion);
         Some(frame)
