@@ -2186,6 +2186,25 @@ async fn run_client_loop(
                             &mut write_stream,
                             &mut prefix_input_source,
                         )?;
+                        // fork: context tabs
+                        if let Some(outcome) = state
+                            .shell
+                            .as_mut()
+                            .and_then(|shell| shell.take_context_token_reports())
+                        {
+                            if finish_client_shell_input(
+                                &mut state,
+                                outcome,
+                                None,
+                                &mut write_stream,
+                                &mut pending_activation,
+                                &mut endpoint_commands,
+                                &mut prefix_input_source,
+                                &mut scheduled_activation,
+                            )? {
+                                return Ok(());
+                            }
+                        }
                         if matches!(
                             activation_progress,
                             Some(endpoint::SurfaceActivationProgress::Ready)

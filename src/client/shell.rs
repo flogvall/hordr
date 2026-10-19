@@ -9,6 +9,8 @@ use workspace_navigation::{PendingWorkspaceHighlight, WorkspaceNavigationTarget}
 mod composition;
 mod config;
 mod context_menu;
+// fork: context tabs
+mod contexts;
 mod copy_mode;
 mod endpoint_agent_state;
 mod endpoint_agents;
