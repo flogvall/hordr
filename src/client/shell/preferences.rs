@@ -14,6 +14,36 @@ pub(super) struct ClientRemoteCollapsedGroups {
     pub(super) collapsed_groups: Vec<String>,
 }
 
+// fork: context tabs
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub(super) enum ClientContextSelection {
+    Default,
+    All,
+    Named { name: String },
+}
+
+// fork: context tabs
+/// Backup of one workspace's context so it can be re-reported after a server restart.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub(super) struct ClientWorkspaceContext {
+    pub(super) endpoint: String,
+    pub(super) boot_id: String,
+    pub(super) workspace_id: String,
+    pub(super) context: String,
+}
+
+// fork: context tabs
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub(super) struct ClientContextPreferences {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) active: Option<ClientContextSelection>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) known: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) workspaces: Vec<ClientWorkspaceContext>,
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub(super) struct ClientChromePreferences {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -28,6 +58,9 @@ pub(super) struct ClientChromePreferences {
     pub(super) collapsed_groups: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(super) remote_collapsed_groups: Vec<ClientRemoteCollapsedGroups>,
+    // fork: context tabs
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) contexts: Option<ClientContextPreferences>,
 }
 
 pub(super) fn path_for_local_endpoint(socket_path: &Path) -> PathBuf {
@@ -120,6 +153,34 @@ mod tests {
 
         assert_eq!(preferences.collapsed_groups, ["/repo"]);
         assert!(preferences.remote_collapsed_groups.is_empty());
+        assert!(preferences.contexts.is_none());
+    }
+
+    // fork: context tabs
+    #[test]
+    fn context_preferences_round_trip_and_omit_defaults() {
+        let preferences = ClientChromePreferences {
+            contexts: Some(ClientContextPreferences {
+                active: Some(ClientContextSelection::Named {
+                    name: "kund".into(),
+                }),
+                known: vec!["kund".into(), "privat".into()],
+                workspaces: vec![ClientWorkspaceContext {
+                    endpoint: "local".into(),
+                    boot_id: "boot-1".into(),
+                    workspace_id: "ws_1".into(),
+                    context: "kund".into(),
+                }],
+            }),
+            ..ClientChromePreferences::default()
+        };
+        let json = serde_json::to_string(&preferences).expect("encode");
+        assert!(json.contains(r#""kind":"named""#));
+        let decoded: ClientChromePreferences = serde_json::from_str(&json).expect("decode");
+        assert_eq!(decoded.contexts, preferences.contexts);
+        assert!(!serde_json::to_string(&ClientChromePreferences::default())
+            .expect("encode default")
+            .contains("contexts"));
     }
 
     #[test]
