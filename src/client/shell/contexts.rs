@@ -160,6 +160,8 @@ pub(super) struct ContextState {
     /// Most recently focused (endpoint storage key, workspace id) per default/named
     /// context, so switching tabs lands where the user last worked.
     recent: HashMap<ActiveContext, (String, String)>,
+    /// Focus mode: the bar draws only the active tab. Switching by key still works.
+    focus: bool,
 }
 
 impl ContextState {
@@ -178,10 +180,12 @@ impl ContextState {
             queued_reports: Vec::new(),
             untagged: HashMap::new(),
             recent: HashMap::new(),
+            focus: false,
         };
         let Some(saved) = saved else {
             return state;
         };
+        state.focus = saved.focus;
         for name in &saved.known {
             state.add_known(name);
         }
@@ -339,6 +343,36 @@ impl ContextState {
         self.recent
             .get(context)
             .map(|(endpoint, workspace_id)| (endpoint.as_str(), workspace_id.as_str()))
+    }
+
+    pub(super) fn focus(&self) -> bool {
+        self.focus
+    }
+
+    pub(super) fn set_focus(&mut self, focus: bool) -> bool {
+        if self.focus == focus {
+            return false;
+        }
+        self.focus = focus;
+        true
+    }
+
+    /// The tab currently drawn as selected (`default` while nothing matches).
+    pub(super) fn active_tab(&self) -> ContextTab {
+        match &self.active {
+            ActiveContext::Default => ContextTab::Default,
+            ActiveContext::Named(name) => ContextTab::Named(name.clone()),
+            ActiveContext::All => ContextTab::All,
+        }
+    }
+
+    /// What the bar draws: every tab, or only the active one in focus mode.
+    pub(super) fn visible_tabs(&self) -> Vec<ContextTab> {
+        if self.focus {
+            vec![self.active_tab()]
+        } else {
+            self.tabs()
+        }
     }
 
     /// Selectable targets in tab order (everything except `+`), used by next/previous.
@@ -660,6 +694,7 @@ impl ContextState {
             known: self.known.iter().cloned().collect(),
             workspaces,
             recent,
+            focus: self.focus,
         };
         (preferences != ClientContextPreferences::default()).then_some(preferences)
     }
@@ -940,12 +975,25 @@ impl super::ClientShellState {
         outcome: &mut super::ClientShellInput,
     ) {
         match tab.to_active() {
+            // Clicking the tab that is already selected toggles focus mode.
+            Some(active) if &active == self.contexts.active() => {
+                let focus = !self.contexts.focus();
+                self.set_context_focus(focus, outcome);
+            }
             Some(active) => self.activate_context(active, outcome),
             None => {
                 self.open_new_context_overlay(None);
                 outcome.repaint = true;
             }
         }
+    }
+
+    /// Focus mode hides every tab but the active one; persisted with the other state.
+    pub(super) fn set_context_focus(&mut self, focus: bool, outcome: &mut super::ClientShellInput) {
+        if self.contexts.set_focus(focus) {
+            self.persist_chrome_preferences(outcome);
+        }
+        outcome.repaint = true;
     }
 
     /// Reuses the inline rename prompt to ask for a context name.
@@ -1140,7 +1188,7 @@ pub(super) fn render_tab_row(
         return;
     }
     buffer.set_style(area, Style::default().bg(palette.panel_bg));
-    let tabs = state.tabs();
+    let tabs = state.visible_tabs();
     let default_name = state.default_name();
     let labels = tabs
         .iter()

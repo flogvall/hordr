@@ -555,6 +555,7 @@ pub(super) enum ClientContextMenuAction {
     NewContextForWorkspace,
     RenameContext,
     RemoveContext,
+    ToggleContextFocus,
 }
 
 #[derive(Debug)]
@@ -577,7 +578,11 @@ pub(super) enum ClientContextMenuTarget {
     },
     // fork: context tabs
     ContextTab {
-        name: String,
+        /// User-created context name; `None` for the built-in default/all tabs.
+        name: Option<String>,
+        /// Whether this is the selected tab (gets the focus toggle).
+        active: bool,
+        focus: bool,
     },
     Tab {
         tab_id: String,
