@@ -53,6 +53,9 @@ pub(super) struct ClientContextPreferences {
     pub(super) workspaces: Vec<ClientWorkspaceContext>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(super) recent: Vec<ClientContextRecent>,
+    /// Focus mode: the bar shows only the active tab.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(super) focus: bool,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -187,6 +190,7 @@ mod tests {
                     endpoint: "local".into(),
                     workspace_id: "ws_2".into(),
                 }],
+                focus: true,
             }),
             ..ClientChromePreferences::default()
         };

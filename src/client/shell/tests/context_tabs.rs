@@ -970,15 +970,17 @@ fn workspace_menu_creates_a_context_for_the_workspace() {
 fn tab_menu_renames_and_removes_contexts() {
     let mut state = contextual_state(Some("context"));
     state.compose(106, 30).expect("composed frame");
-    for tab in [
-        contexts::ContextTab::New,
-        contexts::ContextTab::Default,
-        contexts::ContextTab::All,
-    ] {
+    // Unselected built-in tabs and "+" have no menu; the selected default tab only
+    // offers the focus toggle.
+    for tab in [contexts::ContextTab::New, contexts::ContextTab::All] {
         let rect = tab_rect(&state, &tab);
         right_click(&mut state, rect.x, rect.y);
         assert!(state.overlay.is_none(), "{tab:?} has no menu");
     }
+    let default = tab_rect(&state, &contexts::ContextTab::Default);
+    right_click(&mut state, default.x, default.y);
+    assert_eq!(menu_labels(&state), ["Focus"]);
+    state.overlay = None;
 
     let kund = tab_rect(&state, &contexts::ContextTab::Named("kund".into()));
     right_click(&mut state, kund.x, kund.y);
@@ -1046,6 +1048,85 @@ fn tab_menu_renames_and_removes_contexts() {
     state.compose(106, 30).expect("composed frame");
     assert_eq!(visible_workspaces(&state), ["ws_1", "ws_2", "ws_4"]);
     assert_eq!(heading_row(&mut state, 106), " + default privat all");
+}
+
+#[test]
+fn focus_mode_shows_only_the_active_tab() {
+    let path = std::env::temp_dir().join(format!(
+        "herdr-context-tabs-focus-{}.json",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_file(&path);
+    let mut config = Config::default();
+    config.ui.sidebar.spaces.context_token = Some("context".into());
+    config.keys.next_context = crate::config::BindingConfig::one("prefix+shift+u");
+    let mut state = ClientShellState::new(
+        ClientShellConfig::from_config(&config).with_preferences_path(path.clone()),
+    );
+    state.sidebar_width = 32;
+    state.sidebar_width_manual = true;
+    state.set_snapshot(Box::new(contextual_snapshot()));
+    state.set_pane_surface(surface());
+    state.compose(106, 30).expect("composed frame");
+
+    // Clicking the already selected tab enters focus mode: only that tab is drawn.
+    let default = tab_rect(&state, &contexts::ContextTab::Default);
+    let outcome = click(&mut state, default.x, default.y);
+    assert!(outcome.actions.is_empty());
+    assert!(state.contexts.focus());
+    assert_eq!(heading_row(&mut state, 106), " default");
+    assert_eq!(tab_hits(&state), [contexts::ContextTab::Default]);
+
+    // Keys still switch context; the bar follows the selection.
+    state.handle_input_bytes(&[0x02]);
+    state.handle_input_bytes(b"U");
+    assert_eq!(
+        state.contexts.active(),
+        &contexts::ActiveContext::Named("kund".into())
+    );
+    assert_eq!(heading_row(&mut state, 106), " kund");
+    assert!(state.contexts.focus());
+
+    // Right-click on the visible tab offers "Show all tabs" beside rename/remove.
+    let kund = tab_rect(&state, &contexts::ContextTab::Named("kund".into()));
+    right_click(&mut state, kund.x, kund.y);
+    assert_eq!(
+        menu_labels(&state),
+        ["Show all tabs", "Rename...", "Remove context"]
+    );
+    activate_menu_label(&mut state, "Show all tabs");
+    assert!(!state.contexts.focus());
+    assert_eq!(heading_row(&mut state, 106), " + default kund privat all");
+
+    // Built-in tabs get the toggle only while selected; "+" never gets a menu.
+    let default = tab_rect(&state, &contexts::ContextTab::Default);
+    right_click(&mut state, default.x, default.y);
+    assert!(state.overlay.is_none());
+    let plus = tab_rect(&state, &contexts::ContextTab::New);
+    right_click(&mut state, plus.x, plus.y);
+    assert!(state.overlay.is_none());
+    // The tab moved when the others came back; use its current rect.
+    let kund = tab_rect(&state, &contexts::ContextTab::Named("kund".into()));
+    right_click(&mut state, kund.x, kund.y);
+    assert_eq!(
+        menu_labels(&state),
+        ["Focus", "Rename...", "Remove context"]
+    );
+    activate_menu_label(&mut state, "Focus");
+    assert!(state.contexts.focus());
+    // Clicking the lone tab shows everything again.
+    let kund = tab_rect(&state, &contexts::ContextTab::Named("kund".into()));
+    click(&mut state, kund.x, kund.y);
+    assert!(!state.contexts.focus());
+    assert_eq!(heading_row(&mut state, 106), " + default kund privat all");
+
+    // The mode survives a restart of the client.
+    state.set_context_focus(true, &mut ClientShellInput::default());
+    let reloaded = ClientShellState::new(
+        ClientShellConfig::from_config(&config).with_preferences_path(path.clone()),
+    );
+    assert!(reloaded.contexts.focus());
+    std::fs::remove_file(path).expect("remove preferences");
 }
 
 #[test]

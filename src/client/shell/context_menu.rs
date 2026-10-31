@@ -97,10 +97,24 @@ impl ClientContextMenuOverlay {
                 )))
                 .collect(),
             // fork: context tabs
-            ClientContextMenuTarget::ContextTab { .. } => vec![
-                item("Rename...", Action::RenameContext),
-                item("Remove context", Action::RemoveContext),
-            ],
+            ClientContextMenuTarget::ContextTab {
+                name,
+                active,
+                focus,
+            } => {
+                let mut items = Vec::new();
+                if *active {
+                    items.push(item(
+                        if *focus { "Show all tabs" } else { "Focus" },
+                        Action::ToggleContextFocus,
+                    ));
+                }
+                if name.is_some() {
+                    items.push(item("Rename...", Action::RenameContext));
+                    items.push(item("Remove context", Action::RemoveContext));
+                }
+                items
+            }
         };
         // fork: context tabs
         if let ClientContextMenuTarget::Workspace {
@@ -185,12 +199,17 @@ impl ClientShellState {
         x: u16,
         y: u16,
     ) -> bool {
-        let Some(name) = tab.named() else {
+        let active = tab.is_active(self.contexts.active());
+        let name = tab.named().map(str::to_owned);
+        // Built-in tabs only get a menu while selected (the focus toggle); `+` never.
+        if name.is_none() && !active {
             return false;
-        };
+        }
         self.overlay = Some(ClientShellOverlay::ContextMenu(ClientContextMenuOverlay {
             target: ClientContextMenuTarget::ContextTab {
-                name: name.to_owned(),
+                name,
+                active,
+                focus: self.contexts.focus(),
             },
             x,
             y,
@@ -289,7 +308,7 @@ impl ClientShellState {
                 self.activate_workspace_context_list_action(workspace_id, contexts, action, outcome)
             }
             // fork: context tabs
-            ClientContextMenuTarget::ContextTab { name } => {
+            ClientContextMenuTarget::ContextTab { name, .. } => {
                 self.activate_context_tab_action(name, action, outcome)
             }
             ClientContextMenuTarget::Tab {
@@ -575,19 +594,23 @@ impl ClientShellState {
     // fork: context tabs
     fn activate_context_tab_action(
         &mut self,
-        name: String,
+        name: Option<String>,
         action: ClientContextMenuAction,
         outcome: &mut ClientShellInput,
     ) {
-        match action {
-            ClientContextMenuAction::RenameContext => {
+        match (action, name) {
+            (ClientContextMenuAction::ToggleContextFocus, _) => {
+                let focus = !self.contexts.focus();
+                self.set_context_focus(focus, outcome);
+            }
+            (ClientContextMenuAction::RenameContext, Some(name)) => {
                 self.overlay = Some(ClientShellOverlay::Rename(ClientRenameOverlay {
                     title: "rename context",
                     input: TextEditor::new(&name, false),
                     target: ClientRenameTarget::RenameContext { name },
                 }));
             }
-            ClientContextMenuAction::RemoveContext => {
+            (ClientContextMenuAction::RemoveContext, Some(name)) => {
                 self.open_confirm_remove_context_overlay(name);
             }
             _ => {
