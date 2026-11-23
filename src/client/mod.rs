@@ -19,6 +19,9 @@ mod clipboard_images;
 mod config_reload;
 #[cfg(unix)]
 mod direct_graphics;
+// fork: drop staging
+#[cfg(target_os = "macos")]
+mod drop_staging;
 pub(crate) mod endpoint;
 mod endpoint_commands;
 mod errors;
@@ -855,6 +858,13 @@ async fn run_client_loop(
                     write_stream.active_id(),
                     write_stream.active_surface_available(),
                 );
+                // fork: drop staging
+                #[cfg(target_os = "macos")]
+                let data = if !is_remote_client && write_stream.active_id().is_local() {
+                    drop_staging::stage_protected_drop(&data).unwrap_or(data)
+                } else {
+                    data
+                };
                 if state.shell.is_some() {
                     if will_query_host_cell_size {
                         let events = crate::raw_input::parse_framed_input(&data);
